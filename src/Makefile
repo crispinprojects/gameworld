@@ -1,23 +1,18 @@
-# Makefile for C++ OpenGL game
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -pthread
+LIBS = -lGL -lGLU -lglut
 
-CXX      = g++ -std=c++17 
-CXXFLAGS = -std=c++17 -Wall -O2
-LIBS     = -lGL -lGLU -lglut
-
-SRC  = main.cpp
-OBJ  = $(SRC:.cpp=.o)
+SRCS = main.cpp spider.cpp tree.cpp goldpiece.cpp diamondpiece.cpp tower.cpp slime.cpp vector3.cpp synthesizer.cpp wasp.cpp treasuretower.cpp
+OBJS = $(SRCS:.cpp=.o)
 TARGET = gameworld
 
-all: $(TARGET)
-
-$(TARGET): $(OBJ)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LIBS)
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -f $(OBJS) $(TARGET) *.wav
 
-.PHONY: all clean
-
+.PHONY: clean

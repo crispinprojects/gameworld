@@ -1,27 +1,31 @@
 # GameWorld
 
-**GameWorld** is a 3D world mini game for Linux. The goal is to collect gold pieces and diamonds scattered across the 3D world. Gold pieces and diamonds are protected by spiders and slimes. You have to solve a colour matching puzzle to gain jumping ability to reach diamonds located on top of towers.
+**GameWorld** is a 3D world mini game for Linux. The goal is to collect gold pieces and diamonds scattered across the 3D world. Gold pieces and diamonds are protected by spiders,slimes and flying wasps. 
 
 A screenshot of GameWorld is shown below. 
 
-![](GameWorld.png)
+![](gameworld.png)
 
-This is a low resource game and so can be played using a moderate level CPU with integrated graphics. It has been created using C++ and OpenGL.
+This is a low resource game and so can be played using a moderate level CPU with integrated graphics such as a Raspberry Pi 5. It has been created using C++ and OpenGL.
 
 ## How to Play
 
-The game is played from a first-person perspective. The player experiences the action directly through the eyes of the main character. The player can move around the 3D world and shoot spiders and slimes which attack to protect gold pieces and diamonds. The game is completed when all the gold pieces and diamonds are collected. The player has to solve a colour puzzle to gain the ability to jump on to the top of towers.
+The game is played from a first-person perspective. The player experiences the action directly through the eyes of the main character. The player can move around the 3D world and shoot spiders and slimes which attack to protect gold pieces and diamonds. A game level is completed when all the gold pieces and diamonds are collected. 
 
 | Control | Action |
 | :--- | :--- |
 | **WASD** or **Arrow Keys** | Move the player around 3D world. |
 | **L** | Cycle through EASY → MEDIUM → HARD difficulty level. |
-| **R** | Reset the game. |
+| **U** | Weapon up (increase pitch angle). |
+| **I** | Weapon down (decrease pitch angle). |
 | **Spacebar** | Shoot. |
-| **F** | Flip view by 180 degrees. |
+| **R** | Rotate 90 degrees. |
+| **T** | Tower (jump to tower top). |
+| **G** | Ground (jump to ground level from tower). |
 | **O** | Teleport to start position. |
-| **P** | Cycle through puzzle colours when over colour pad.|
-| **Z** | Radar On/off. |
+| **M** | Map  (game map on/off). |
+| **Z** | Audio (on/off). |
+| **X** | Reset the game. |
 | **ESC** | Exit the game|
 
 ## Installation & Building
@@ -30,7 +34,9 @@ This mini game is built for Linux using **OpenGL** which needs to be installed t
 
 ## Pre-built Binaries
 
-A pre-built binary executable of GameWorld for x86 Debian/Ubuntu is available and can be downloaded from the binary directory. To install the OpenGL prerequisites, give the game executable permission and run GameWorld from the terminal use the commands below.
+Pre-built binary executables of GameWorld for x86 Debian distributions and Raspberry Pi 5 are available and can be downloaded from the binary directory. 
+
+You need to install the OpenGL prerequisites and give the game executable permission. To do this and run GameWorld from the terminal use the commands below.
 
 ```
 sudo apt install freeglut3-dev
@@ -38,15 +44,25 @@ chmod +x gameworld
 ./gameworld
 ```
 
+## Game Map
+
+A game map showing the position of towers, gold pieces, diamonds and enemies can be toggled on and off using the "M" (map) Key.
+
+![](gameworld-map.png)
+
+
 ## Game Play Screenshots
 
-![](GameWorld1.png)
-![](GameWorld2.png)
-![](GameWorld3.png)
-![](GameWorld4.png)
-![](GameWorld5.png)
+![](gameworld1.png)
+![](gameworld2.png)
+![](gameworld3.png)
+![](gameworld4.png)
+![](gameworld5.png)
+![](gameworld6.png)
+![](gameworld7.png)
+![](gameworld8.png)
 
-## Build From Source (Debian/Ubuntu Linux)
+## Build From Source (Debian, Raspberry Pi OS)
 
 The source code is found in the src directory and is released with a GPL 3.0 license.
 
@@ -89,11 +105,6 @@ Make clean is also supported.
 make clean
 ```
 
-To compile manually use: 
-```
-g++ -std=c++17 -o gameworld main.cpp -lGL -lGLU -lglut
-```
-
 ## Build from source (Fedora)
 
 Building the game on Fedora requires installing the following packages.
@@ -111,7 +122,7 @@ A desktop file has a .desktop extension and provides metadata about an applicati
 
 ```
 [Desktop Entry]
-Version=0.1.0
+Version=0.2.0
 Type=Application
 Name=GameWorld
 Comment=3D world mini game
@@ -136,7 +147,7 @@ The code will be updated as and when I find bugs or make improvement to the code
 
 ## Project Status
 
-Game mini project.
+Active.
 
 ## Acknowledgements
 

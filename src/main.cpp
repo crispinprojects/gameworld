@@ -1,23 +1,3 @@
-/* main.cpp GameWorld (C++ OpenGL mini game demo)
- *
- * Copyright 2026 Alan Crispin <crispinalan@gmail.com> *
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
-
 #include <GL/glut.h>
 #include <cmath>
 #include <iostream>
@@ -28,6 +8,27 @@
 #include <cstring>
 #include <set>
 #include <random>
+#include <string>
+#include <queue>
+#include <thread>
+#include <chrono>
+#include <atomic>
+#include <iomanip>
+#include <sstream>
+
+// include all header files
+#include "spider.h"
+#include "vector3.h"
+#include "tree.h"
+#include "goldpiece.h"
+#include "diamondpiece.h"
+#include "tower.h"
+#include "treasuretower.h"
+#include "slime.h"
+#include "wasp.h"
+
+#include "synthesizer.h"
+#include "audio_data.h"  // audio data
 
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 720
@@ -36,42 +37,26 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-// Global constants
-const float BULLET_RADIUS = 0.1f;
-const float PLAYER_PUSH_AWAY_DISTANCE = 2.5f; // Distance to push player back when hitting tower
-const float SLIME_PUSH_AWAY_DISTANCE = 12.0f; // Distance to push slime away from towers
-const float SLIME_TOWER_DISTANCE = 1.0f; // Minimum distance slimes can get to tower edges
-const float JUMP_DISTANCE_RANGE = 2.0f; // Range of distances from cube side at which player can jump
+// Global constants for game physics and gameplay
+const float BULLET_RADIUS = 0.1f;                    // Radius of player bullets
+const float PLAYER_PUSH_AWAY_DISTANCE = 2.5f;       // Distance to push player back when hitting tower
+const float SLIME_PUSH_AWAY_DISTANCE = 12.0f;       // Distance to push slime away from towers
+const float SLIME_TOWER_DISTANCE = 1.0f;            // Minimum distance slimes can get to tower edges
+const float JUMP_DISTANCE_RANGE = 6.0f;             // Range of distances from cube side at which player can jump
 
+const float SLIME_CHASE_DISTANCE = 10.0f;            // Distance at which slimes start chasing
+const float SPIDER_CHASE_DISTANCE = 20.0f;          // Distance at which spiders start chasing
+
+const float WASP_HIT_RADIUS = 1.4f;                  // Radius for wasp collision detection
+
+// Global variables
 float slimeAnimation = 0.0f;
-const float SLIME_CHASE_DISTANCE = 5.0f;
-const float SPIDER_CHASE_DISTANCE = 15.0f;
-
-//global variables
 bool showRadar = true;
-float radarScale = 0.05f; // Scale for radar display
-
-float spiderLegAnimation = 0.0f;
-
-// 3D vector helper
-class Vector3 {
-public:
-    float x, y, z;
-    Vector3() : x(0), y(0), z(0) {}
-    Vector3(float x, float y, float z) : x(x), y(y), z(z) {}
-
-    Vector3 operator+(const Vector3& o) const { return Vector3(x + o.x, y + o.y, z + o.z); }
-    Vector3 operator-(const Vector3& o) const { return Vector3(x - o.x, y - o.y, z - o.z); }
-    Vector3 operator*(float s) const      { return Vector3(x * s, y * s, z * s); }
-    Vector3& operator+=(const Vector3& o) { x += o.x; y += o.y; z += o.z; return *this; }
-    Vector3& operator-=(const Vector3& o) { x -= o.x; y -= o.y; z -= o.z; return *this; }
-};
-
-float distance(const Vector3& a, const Vector3& b) {
-    float dx = a.x - b.x;
-    float dz = a.z - b.z;
-    return sqrt(dx*dx + dz*dz);
-}
+float radarScale = 0.05f;                           // Scale for radar display
+float spiderLegAnimation = 0.0f;                    // Animation counter for spider legs
+int frameCount = 0;                                 // Frame counter for FPS calculation
+int lastTime = 0;                                   // Last time for FPS calculation
+float fps = 0.0f;                                   // Current FPS value
 
 // Standard collision detection for game entities
 bool checkCollision(const Vector3& pos1, const Vector3& pos2, float radius1, float radius2) {
@@ -121,931 +106,572 @@ bool checkSlimeCollision(const Vector3& pos1, const Vector3& pos2, float radius1
 }
 
 //======================================================================
-class Tree {
-public:
-    Vector3 position;
-    static constexpr float TREE_SCALE      = 1.0f;
-    static constexpr float TRUNK_HEIGHT    = 2.0f * TREE_SCALE;
-    static constexpr float TRUNK_WIDTH     = 0.2f * TREE_SCALE;
-    static constexpr float TRUNK_DEPTH     = 0.2f * TREE_SCALE;
-    static constexpr float CANOPY_HEIGHT   = 1.5f * TREE_SCALE;
-    static constexpr float CANOPY_RADIUS   = 1.0f * TREE_SCALE;
-    static constexpr float TREE_OFFSET     = 1.0f; // matches trunk height
-
-    Tree(const Vector3& pos) : position(pos) {}
-
-    void draw() const {
-        // Trunk
-        glPushMatrix();
-        glTranslatef(position.x, position.y + TREE_OFFSET, position.z);
-        glScalef(TRUNK_WIDTH, TRUNK_HEIGHT, TRUNK_DEPTH);
-        glColor3f(0.6f, 0.4f, 0.2f);
-        glutSolidCube(1.0f);
-        glPopMatrix();
-
-        // Leaves
-        glPushMatrix();
-        glTranslatef(position.x,
-                     position.y + TREE_OFFSET + TRUNK_HEIGHT/2.0f + CANOPY_HEIGHT/2.0f,
-                     position.z);
-        glScalef(CANOPY_RADIUS, CANOPY_HEIGHT, CANOPY_RADIUS);
-        glColor3f(0.0f, 0.5f, 0.0f);
-        glutSolidSphere(1.0f, 10, 10);
-        glPopMatrix();
-    }
-};
+// AUDIO MANAGER
 //======================================================================
-class GoldPiece {
+
+bool audioEnabled = true; // Toggle for audio on/off
+
+class SimplePhraseBuilder {
 public:
-    Vector3 position;
-    bool collected;
-    static constexpr float GOLD_SCALE   = 1.0f;
-    static constexpr float GOLD_RADIUS  = 0.5f * GOLD_SCALE;
-    static constexpr float GOLD_OFFSET  = 0.5f;
-
-    GoldPiece(const Vector3& pos) : position(pos), collected(false) {}
-
-    void draw() const {
-        if (!collected) {
-            glPushMatrix();
-            glTranslatef(position.x, position.y + GOLD_OFFSET, position.z);
-            glColor3f(1.0f, 1.0f, 0.0f); // Yellow
-            glutSolidSphere(GOLD_RADIUS, 10, 10);
-            glPopMatrix();
+    static void buildPhrase(const std::vector<VoiceWord>& words, std::vector<int16_t>& buffer) {
+        extern int predicted_sample;
+        extern int step_index;
+        
+        for (VoiceWord word : words) {
+            // Reset decoder state
+            predicted_sample = 0;
+            step_index = 0;
+            
+            AudioLookup lookup = voice_dictionary[word];
+            for (uint32_t i = 0; i < lookup.length; i++) {
+                uint8_t byte = lookup.data[i];
+                buffer.push_back(decode_adpcm_nibble(byte & 0x0F));
+                buffer.push_back(decode_adpcm_nibble((byte >> 4) & 0x0F));
+            }
+            
+            // Add silence between words
+            for (int s = 0; s < 1600; s++) {
+                buffer.push_back(0);
+            }
         }
     }
 };
 
-//======================================================================
-class Pad {
+class GameAudioManager {
+private:
+    std::atomic<bool> is_playing{false};
+    
 public:
-    Vector3 position;    
-    static constexpr float PAD_SCALE   = 2.0f;
-    static constexpr float PAD_WIDTH = 0.8f * PAD_SCALE;
-    static constexpr float PAD_HEIGHT = 0.2f * PAD_SCALE;
-    static constexpr float PAD_DEPTH = 0.8f * PAD_SCALE;     
-    static constexpr float PAD_OFFSET = 0.0f;   
-    bool isComplete; // Track if pad has correct color combination
+    GameAudioManager() {}
+    ~GameAudioManager() {}
     
-    Pad(const Vector3& pos) : position(pos), isComplete(false) {}
-    
-    // Modified draw method that accepts color information
-    void draw(const std::vector<float>& colorRGB) const {        
-        glPushMatrix();
-        glTranslatef(position.x, position.y + PAD_OFFSET, position.z);		
-        glPushMatrix();
-        glTranslatef(0.0f, PAD_HEIGHT, 0.0f);
-        glScalef(PAD_WIDTH, PAD_HEIGHT, PAD_DEPTH);
+    // Play phrase in background thread
+    void playPhraseAsync(const std::vector<VoiceWord>& words) {
+        if (is_playing.load()) {
+            return; // Already playing, skip
+        }
         
-        // Use the passed color instead of hardcoded red
-        glColor3f(colorRGB[0], colorRGB[1], colorRGB[2]);
-        glutSolidCube(1.0f);
-        glPopMatrix();  
-        glPopMatrix();
+        // Start audio playback in separate thread
+        std::thread([this, words]() {
+            is_playing.store(true);
+            
+            // Build audio buffer
+            std::vector<int16_t> full_audio;
+            SimplePhraseBuilder::buildPhrase(words, full_audio);
+            
+            // Save to temporary file and play
+            std::ofstream file("temp_audio.wav", std::ios::binary);
+            if (file.is_open()) {
+                write_wav_header(file, static_cast<int>(full_audio.size()), SAMPLE_RATE);
+                file.write(reinterpret_cast<const char*>(full_audio.data()),
+                           full_audio.size() * sizeof(int16_t));
+                file.close();
+                
+                // Play immediately
+                system("aplay temp_audio.wav > /dev/null 2>&1");
+            }
+            
+            is_playing.store(false);
+        }).detach(); // Detach thread to let it run independently
     }
     
-    // Simple draw method for when no color is specified (default)
-    void draw() const {        
-        glPushMatrix();
-        glTranslatef(position.x, position.y + PAD_OFFSET, position.z);		
-        glPushMatrix();
-        glTranslatef(0.0f, PAD_HEIGHT, 0.0f);
-        glScalef(PAD_WIDTH, PAD_HEIGHT, PAD_DEPTH);
+    // Immediate playback (blocking)
+    void playImmediatePhrase(const std::vector<VoiceWord>& words) {
+        // Build audio buffer
+        std::vector<int16_t> full_audio;
+        SimplePhraseBuilder::buildPhrase(words, full_audio);
         
-        // Default to red if no color provided
-        glColor3f(1.0f, 0.0f, 0.0f);
-        glutSolidCube(1.0f);
-        glPopMatrix();  
-        glPopMatrix();
-    }
-};
-
-//======================================================================
-class Spider {
-public:
-    Vector3 position;
-    bool alive;
-    float angle;
-    float speed;
-    Vector3 startPosition;
-    int hitCount;
-    bool chasing = false;
-
-    static constexpr float SPIDER_SCALE      = 1.0f;
-    static constexpr float SPIDER_RADIUS     = 0.8f * SPIDER_SCALE;
-    static constexpr float SPIDER_OFFSET     = SPIDER_SCALE / 2 + 0.1f;
-    static constexpr float SPIDER_BODY_WIDTH = 0.5f * SPIDER_SCALE;
-    static constexpr float SPIDER_BODY_HEIGHT = 0.75f * SPIDER_SCALE;
-    static constexpr float SPIDER_BODY_DEPTH  = 0.5f * SPIDER_SCALE;
-    static constexpr float SPIDER_LEG_WIDTH  = 0.2f * SPIDER_SCALE;
-    static constexpr float SPIDER_LEG_HEIGHT = 0.8f * SPIDER_SCALE;
-    static constexpr float SPIDER_LEG_DEPTH  = 0.2f * SPIDER_SCALE;
-    static constexpr float SPIDER_LEG_ANGLE  = 45.0f; // degrees
-
-    Spider(const Vector3& pos)
-        : position(pos), alive(true), angle(0.0f), speed(0.02f),
-          startPosition(pos), hitCount(0), chasing(false) {}
-
-    // Walking routine – skipped while chasing
-    void update() {
-        if (!alive || hitCount >= 4) return;
-        if (chasing) return;  // do not walk while chasing
-
-        angle += speed;
-        float baseRadius = 1.0f;
-        float variation  = 0.5f;
-        float radius = baseRadius + variation * sin(angle * 0.3f);
-        position.x = startPosition.x + radius * cos(angle);
-        position.z = startPosition.z + radius * sin(angle);
-    }
-
-    void draw(float legAnimation) const {
-        if (!alive) return;
-
-        glPushMatrix();
-        glTranslatef(position.x, position.y + SPIDER_OFFSET, position.z);
-
-        // Body
-        glPushMatrix();
-        glColor3f(0.0f, 0.0f, 0.0f);
-        glutSolidSphere(SPIDER_RADIUS, 10, 10);
-        glPopMatrix();
-
-        // Eyes
-        glPushMatrix();
-        glTranslatef(-SPIDER_RADIUS * 0.3f, SPIDER_RADIUS * 0.9f, 0.0f);
-        glColor3f(1.0f, 1.0f, 0.0f);
-        glutSolidSphere(SPIDER_RADIUS * 0.2f, 8, 8);
-        glPopMatrix();
-
-        glPushMatrix();
-        glTranslatef(SPIDER_RADIUS * 0.3f, SPIDER_RADIUS * 0.9f, 0.0f);
-        glColor3f(1.0f, 1.0f, 0.0f);
-        glutSolidSphere(SPIDER_RADIUS * 0.2f, 8, 8);
-        glPopMatrix();
-
-        // Legs left
-        auto drawLegLeft = [](float angleDeg, float offset) {
-            glPushMatrix();
-            float rad = angleDeg * M_PI / 180.0f;
-            float lx  = SPIDER_RADIUS * cos(rad);
-            float lz  = SPIDER_RADIUS * sin(rad);
-            glTranslatef(lx, 0.0f, lz);
-            glRotatef(90.0f, 0, 1, 0);
-            glRotatef(-SPIDER_LEG_ANGLE, 1, 0, 0);
-            glTranslatef(0.0f, offset, 0.0f);
-            glScalef(SPIDER_LEG_WIDTH, SPIDER_LEG_HEIGHT, SPIDER_LEG_DEPTH);
-            glColor3f(0.0f, 0.0f, 0.0f);
-            glutSolidCube(1.0f);
-            glPopMatrix();
-        };
-        
-         // Legs right
-        auto drawLegRight = [](float angleDeg, float offset) {
-            glPushMatrix();
-            float rad = angleDeg * M_PI / 180.0f;
-            float lx  = SPIDER_RADIUS * cos(rad);
-            float lz  = SPIDER_RADIUS * sin(rad);
-            glTranslatef(lx, 0.0f, lz);
-            glRotatef(90.0f, 0, 1, 0);
-            glRotatef(SPIDER_LEG_ANGLE, 1, 0, 0);
-            glTranslatef(0.0f, offset, 0.0f);
-            glScalef(SPIDER_LEG_WIDTH, SPIDER_LEG_HEIGHT, SPIDER_LEG_DEPTH);
-            glColor3f(0.0f, 0.0f, 0.0f);
-            glutSolidCube(1.0f);
-            glPopMatrix();
-        };
-
-        drawLegLeft(0.0f, sin(legAnimation + 0) * (SPIDER_LEG_HEIGHT / 2.0f));
-        drawLegLeft(90.0f, sin(legAnimation + 1) * (SPIDER_LEG_HEIGHT / 2.0f));
-        drawLegRight(180.0f, sin(legAnimation + 2) * (SPIDER_LEG_HEIGHT / 2.0f));
-        drawLegRight(270.0f, sin(legAnimation + 3) * (SPIDER_LEG_HEIGHT / 2.0f));
-
-        glPopMatrix();
-    }
-};
-//======================================================================
-class DiamondPiece {
-public:
-    Vector3 position;
-    bool collected;
-    static constexpr float DIAMOND_SCALE   = 1.0f;    
-    static constexpr float DIAMOND_OFFSET  = 0.5f;
-    static constexpr float DIAMOND_HEIGHT  = 1.0f * DIAMOND_SCALE; // Height of diamond
-    static constexpr float DIAMOND_BASE_RADIUS = 0.5f * DIAMOND_SCALE; // Base radius
-    
-    DiamondPiece(const Vector3& pos) : position(pos), collected(false) {}   
-    
-    void draw() const {
-        if (!collected) {
-            glPushMatrix();
-            glTranslatef(position.x, position.y + DIAMOND_OFFSET, position.z);
+        // Save to temporary file and play
+        std::ofstream file("temp_audio.wav", std::ios::binary);
+        if (file.is_open()) {
+            write_wav_header(file, static_cast<int>(full_audio.size()), SAMPLE_RATE);
+            file.write(reinterpret_cast<const char*>(full_audio.data()),
+                       full_audio.size() * sizeof(int16_t));
+            file.close();
             
-            // Draw an octahedron (diamond shape)
-            glColor3f(1.0f, 0.8f, 0.0f); // Gold color for diamond
-            
-            float baseRadius = DIAMOND_BASE_RADIUS;
-            float height = DIAMOND_HEIGHT;
-            
-            // Define vertices of the octahedron
-            // Top vertex
-            float top_y = height/2.0f;
-            // Bottom vertex  
-            float bottom_y = -height/2.0f;
-            
-            // Four base vertices (square in xz plane)
-            float v1_x = baseRadius;   float v1_z = 0.0f;
-            float v2_x = 0.0f;         float v2_z = baseRadius;
-            float v3_x = -baseRadius;  float v3_z = 0.0f;
-            float v4_x = 0.0f;         float v4_z = -baseRadius;
-            
-            // Draw all 8 triangular faces
-            glBegin(GL_TRIANGLES);
-            // Front face (top, v1, v2)
-            glVertex3f(0.0f, top_y, 0.0f);
-            glVertex3f(v1_x, 0.0f, v1_z);
-            glVertex3f(v2_x, 0.0f, v2_z);
-            glEnd();
-            
-            glBegin(GL_TRIANGLES);
-            // Right face (top, v2, v3)
-            glVertex3f(0.0f, top_y, 0.0f);
-            glVertex3f(v2_x, 0.0f, v2_z);
-            glVertex3f(v3_x, 0.0f, v3_z);
-            glEnd();
-            
-            glBegin(GL_TRIANGLES);
-            // Back face (top, v3, v4)
-            glVertex3f(0.0f, top_y, 0.0f);
-            glVertex3f(v3_x, 0.0f, v3_z);
-            glVertex3f(v4_x, 0.0f, v4_z);
-            glEnd();
-            
-            glBegin(GL_TRIANGLES);
-            // Left face (top, v4, v1)
-            glVertex3f(0.0f, top_y, 0.0f);
-            glVertex3f(v4_x, 0.0f, v4_z);
-            glVertex3f(v1_x, 0.0f, v1_z);
-            glEnd();
-            
-            glBegin(GL_TRIANGLES);
-            // Bottom front face (bottom, v1, v2)
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v1_x, 0.0f, v1_z);
-            glVertex3f(v2_x, 0.0f, v2_z);
-            glEnd();
-            
-            glBegin(GL_TRIANGLES);
-            // Bottom right face (bottom, v2, v3)
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v2_x, 0.0f, v2_z);
-            glVertex3f(v3_x, 0.0f, v3_z);
-            glEnd();
-            
-            glBegin(GL_TRIANGLES);
-            // Bottom back face (bottom, v3, v4)
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v3_x, 0.0f, v3_z);
-            glVertex3f(v4_x, 0.0f, v4_z);
-            glEnd();
-            
-            glBegin(GL_TRIANGLES);
-            // Bottom left face (bottom, v4, v1)
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v4_x, 0.0f, v4_z);
-            glVertex3f(v1_x, 0.0f, v1_z);
-            glEnd();
-            
-            // Draw edges for better visibility
-            glColor3f(0.0f, 0.0f, 0.0f); // Black edges
-            glLineWidth(1.0);
-            glBegin(GL_LINES);
-            // Top edges
-            glVertex3f(0.0f, top_y, 0.0f);
-            glVertex3f(v1_x, 0.0f, v1_z);
-            glVertex3f(0.0f, top_y, 0.0f);
-            glVertex3f(v2_x, 0.0f, v2_z);
-            glVertex3f(0.0f, top_y, 0.0f);
-            glVertex3f(v3_x, 0.0f, v3_z);
-            glVertex3f(0.0f, top_y, 0.0f);
-            glVertex3f(v4_x, 0.0f, v4_z);
-            
-            // Bottom edges
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v1_x, 0.0f, v1_z);
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v2_x, 0.0f, v2_z);
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v3_x, 0.0f, v3_z);
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v4_x, 0.0f, v4_z);
-            
-            // Vertical edges
-            glVertex3f(v1_x, 0.0f, v1_z);
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v2_x, 0.0f, v2_z);
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v3_x, 0.0f, v3_z);
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            glVertex3f(v4_x, 0.0f, v4_z);
-            glVertex3f(0.0f, bottom_y, 0.0f);
-            
-            glEnd();
-            
-            glPopMatrix();
+            // Play immediately (blocking)
+            system("aplay temp_audio.wav > /dev/null 2>&1");
         }
     }
-};
-
-//======================================================================
-class Slime{
-public:
-    Vector3 position;
-    bool alive;
-    float angle;
-    float speed;
-    Vector3 startPosition;
-    int hitCount;
-    bool chasing = false;       
-    static constexpr float SLIME_SCALE   = 1.0f;
-    static constexpr float SLIME_HEAD_RADIUS  = 0.8f * SLIME_SCALE;
-    static constexpr float SLIME_OFFSET  = 0.5f;    
-    static constexpr float SLIME_LEG_RADIUS  = 0.15f * SLIME_SCALE;   
-    static constexpr float SLIME_LEG_HEIGHT = 3.0f * SLIME_SCALE; 
     
-    // Helper function to draw a cylinder using quads
-    void drawCylinder(float radius, float height, int slices) const {
-        glBegin(GL_QUAD_STRIP);
-        for (int i = 0; i <= slices; i++) {
-            float angle = (float)i / slices * 2.0f * M_PI;
-            float x = radius * cos(angle);
-            float z = radius * sin(angle);
-            glVertex3f(x, -height/2, z);
-            glVertex3f(x, height/2, z);
-        }
-        glEnd();
-    }    
-    
-    Slime(const Vector3& pos)
-        : position(pos), alive(true), angle(0.0f), speed(0.02f),
-          startPosition(pos), hitCount(0), chasing(false) {}  
-    
-    void draw(float slimeAnimation) const {       
-        if (!alive) return;        
-        glPushMatrix();
-        glTranslatef(position.x, position.y + SLIME_OFFSET, position.z);   
-        // Head - sphere
-        glColor3f(0.0f, 0.0f, 0.0f); // black color for head
-        glutSolidSphere(SLIME_HEAD_RADIUS, 10, 10);        
-        // Leg - cylinder connected to head, extending vertically
-        glPushMatrix();
-        // Move to the bottom of the head
-        glTranslatef(0.0f, SLIME_HEAD_RADIUS/2, 0.0f);
-        // Rotate to make cylinder stand upright (for side-to-side wagging)
-        glRotatef(90.0f, 1.0f, 0.0f, 0.0f); // Rotate around X-axis for side-to-side motion
-        // Position the cylinder so its bottom connects to head
-        glTranslatef(0.0f, SLIME_LEG_HEIGHT/2, 0.0f);
-        // Add animation - side-to-side wagging motion
-        float legMotion = sin(slimeAnimation * 0.5f) * 0.3f; // Slower animation for smoother wagging
-        glTranslatef(legMotion, 0.0f, 0.0f); // Move horizontally to create wagging effect
-        glColor3f(0.0f, 0.0f, 0.0f); // black color for leg
-        drawCylinder(SLIME_LEG_RADIUS, SLIME_LEG_HEIGHT, 10);
-        glPopMatrix();        
-        glPopMatrix();
-    }
-    
-    // Slime moving
-    void update() {
-        if (!alive) return;
-        if (chasing) return;  // do not walk while chasing
-
-        angle += speed;
-        float baseRadius = 1.0f;
-        float variation  = 0.5f;
-        float radius = baseRadius + variation * sin(angle * 0.3f);
-        position.x = startPosition.x + radius * cos(angle);
-        position.z = startPosition.z + radius * sin(angle);
-    }
-        
-};
-
-//======================================================================
-class Tower {
-// Tower cube
-public:
-    Vector3 position;    
-    static constexpr float TOWER_WIDTH   = 6.0f;      // Increased width for walking surface
-    static constexpr float TOWER_HEIGHT  = 4.0f;      // Height increased
-    static constexpr float TOWER_DEPTH   = 6.0f;      // Depth of tower
-    Tower(const Vector3& pos) : position(pos) {}
-    
-    void draw() const {        
-        glPushMatrix();
-        glTranslatef(position.x, position.y, position.z);  
-        
-        // Draw the cube (tower)
-        glColor3f(1.0f, 0.0f, 0.0f); // red color 
-        
-        // Front face
-        glBegin(GL_QUADS);
-        glVertex3f(-TOWER_WIDTH/2, -TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, -TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glVertex3f(-TOWER_WIDTH/2, TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glEnd();
-        
-        // Back face
-        glBegin(GL_QUADS);
-        glVertex3f(-TOWER_WIDTH/2, -TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, -TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glVertex3f(-TOWER_WIDTH/2, TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glEnd();
-        
-        // Left face
-        glBegin(GL_QUADS);
-        glVertex3f(-TOWER_WIDTH/2, -TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glVertex3f(-TOWER_WIDTH/2, -TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glVertex3f(-TOWER_WIDTH/2, TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glVertex3f(-TOWER_WIDTH/2, TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glEnd();
-        
-        // Right face
-        glBegin(GL_QUADS);
-        glVertex3f(TOWER_WIDTH/2, -TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, -TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glEnd();
-        
-        // Top face
-        glBegin(GL_QUADS);
-        glVertex3f(-TOWER_WIDTH/2, TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glVertex3f(-TOWER_WIDTH/2, TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glEnd();
-        
-        // Bottom face
-        glBegin(GL_QUADS);
-        glVertex3f(-TOWER_WIDTH/2, -TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, -TOWER_HEIGHT/2, -TOWER_DEPTH/2);
-        glVertex3f(TOWER_WIDTH/2, -TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glVertex3f(-TOWER_WIDTH/2, -TOWER_HEIGHT/2, TOWER_DEPTH/2);
-        glEnd();
-        
-        glPopMatrix();		
+    bool isAudioPlaying() const {
+        return is_playing.load();
     }
 };
+
+// Global audio manager instance
+GameAudioManager* g_audio_manager = nullptr;
+
 //======================================================================
+void playerGameOpenPhrase() {
+    std::vector<VoiceWord> open_phrase = {VOICE_WAKE, VOICE_UP, VOICE_YOU, VOICE_MUST, VOICE_CAPTURE, VOICE_GOLD, VOICE_AND, VOICE_DIAMONDS};
+    g_audio_manager->playPhraseAsync(open_phrase);  // Play asynchronously
+}
+
+void playerGoNorthPhrase() {
+	 if (!audioEnabled) return;
+    std::vector<VoiceWord> north_phrase = {VOICE_GO, VOICE_NORTH};
+    g_audio_manager->playPhraseAsync(north_phrase);  // Play asynchronously
+}
+
+void playerGoldCapturePhrase() {
+	 if (!audioEnabled) return;
+    std::vector<VoiceWord> gold_phrase = {VOICE_GOLD, VOICE_CAPTURE};
+    g_audio_manager->playPhraseAsync(gold_phrase);  // Play asynchronously
+}
+
+void playerDiamondCapturePhrase() {
+	 if (!audioEnabled) return;
+    std::vector<VoiceWord> diamond_phrase = {VOICE_DIAMONDS, VOICE_CAPTURE};
+    g_audio_manager->playPhraseAsync(diamond_phrase);  // Play asynchronously
+}
+
+void playerTeleportPhrase() {
+	 if (!audioEnabled) return;
+    std::vector<VoiceWord> phrase = {VOICE_TELEPORT};
+    g_audio_manager->playPhraseAsync(phrase);  // Play asynchronously
+}
+
+void playerTowerJumpPhrase() {
+	 if (!audioEnabled) return;
+    std::vector<VoiceWord> phrase = {VOICE_TOWER, VOICE_JUMP};
+    g_audio_manager->playPhraseAsync(phrase);  // Play asynchronously
+}
+
+
+
+//======================================================================
+
 class GameState {
 public:
     // Game level configuration
-    enum Level { EASY, MEDIUM, HARD };
-    Level currentLevel;
     
+    enum Level { EASY, MEDIUM, HARD };
+    Level currentLevel;    
     // Configuration variables based on level
     int numberSpiders;
     int numberSlimes;   
     int numberGoldPieces;
     int numberDiamonds;
     int numberPads;
-    int numberTowers;  // Added for tower count control
     
     Vector3 playerPosition;
-    float playerAngle;    // Radians
+    Vector3 levelStartPosition; // Stores where the player should start for  level
+    float playerAngle;    // Radians       
+    float playerPitch;    // For aiming up/down
     float playerHeight;
     bool playerAlive;   
-    bool flipView;  
-    int goldCount = 0;
+    int goldCount=0;
     int collectedDiamonds=0; // Count of collected diamonds
     bool onTower;         // Flag to track if player is on tower
+    bool showMap;         // Flag to show game map
     float towerHeight;    // Height of the tower player is currently on
-    bool towerJumpReady;  // Flag to indicate if player can jump to tower
-    bool canJump;         // Flag to control if player can jump (puzzle requirement)
-    std::string solutionColor;
     
     struct Bullet {
         Vector3 position;
         Vector3 direction;
-        float speed = 0.5f;
+        float speed = 40.0f; // Increased speed for real-time movement
         bool active = true;
-        Bullet(const Vector3& pos, const Vector3& dir) : position(pos), direction(dir){}
-        void update() { position = position + direction * speed; }
+        float lifetime = 2.0f;
+        std::vector<Vector3> history; // Stores previous positions for the trail
+        float playerPitch = 0.0f; // Radians for looking up/down
+        
+        Bullet(const Vector3& pos, const Vector3& dir) : position(pos), direction(dir) {}
+        
+        // Now update takes 'dt' (deltaTime)
+        void update(float dt) {
+            // Save current position for the trail
+            history.insert(history.begin(), position);
+            if (history.size() > 8) history.pop_back(); // Keep only last 8 frames
+            
+            // Move: Position = Position + (Direction * Speed * Time)
+            position.x += direction.x * speed * dt;
+            position.y += direction.y * speed * dt;
+            position.z += direction.z * speed * dt;
+            
+            lifetime -= dt;
+            if (lifetime <= 0) active = false;
+        }
     };
-    
-    // Color combination puzzle specific members
-    struct PadColor {
-        std::vector<std::string> colors;
-        int currentColorIndex;
-        PadColor() : currentColorIndex(0) {}
-    };
-    
-    std::vector<PadColor> padColors;  // Store color combinations for each pad
-    std::vector<std::string> allAvailableColors = {"Red", "Green", "Blue", "Yellow", "Purple", "Orange", "Pink"};
+       
     
     std::vector<Tree> trees;
     std::vector<GoldPiece> goldPieces;
     std::vector<Spider> spiders;   
     std::vector<Bullet> bullets;
     std::vector<Slime> slimes;     
-    std::vector<Tower> towers;      
+    std::vector<Tower> towers;
+    std::vector<TreasureTower> treasuretowers;        
     std::vector<DiamondPiece> diamondPieces;
-    //puzzle
-    std::vector<Pad> pads;
+    
+    // Wasps
+    std::vector<Wasp> wasps;
     
     // Original starting position for reset
     Vector3 originalPosition;
-    float originalAngle;
-       
+    float originalAngle;  
     
-    GameState()
-	: playerPosition(0, 0, -14.0f), 
-	   playerAngle(0.0f), 
-	   playerHeight(1.0f), 
-	   playerAlive(true), 
-	   flipView(false), 
-	   onTower(false), 
-	   towerHeight(0.0f), 
-	   towerJumpReady(false), 
-	   canJump(false),  // Player cannot jump until puzzle is solved
-	   collectedDiamonds(0),
-	   currentLevel(EASY) {     
-		originalPosition = playerPosition;
-		originalAngle = playerAngle;
-		setLevel(currentLevel);
-		generateLevel();
-	}
-
+    
+  GameState()
+    : currentLevel(EASY),
+    playerPosition(0, 0, -70.0f), 
+    playerAngle(0.0f), 
+    playerPitch(0.0f),
+    playerHeight(1.0f), 
+    playerAlive(true),
+    onTower(false),     // Now initialized BEFORE showMap
+    showMap(false),      // Now initialized AFTER onTower
+    towerHeight(0.0f) 
+    {  
+        originalPosition = playerPosition;
+        originalAngle = playerAngle;
+        setLevel(currentLevel);
+        generateLevel();
+    }
+  
     void setLevel(Level level) {
         currentLevel = level;
         
         switch(level) {
             case EASY:
+                levelStartPosition = Vector3(0, 0, -70.0f);
                 numberSpiders = 3;
                 numberSlimes = 2;   
                 numberGoldPieces = 6;
-                numberDiamonds = 2;
+                numberDiamonds = 4;
                 numberPads = 3;
-                numberTowers = 2;  // Fixed for all levels
-                // For easy, use only first 4 colors
-                allAvailableColors = {"Red", "Green", "Blue", "Yellow"};
                 break;
             case MEDIUM:
+				levelStartPosition = Vector3(0, 0, -90.0f); // Further back for larger map
                 numberSpiders = 5;
                 numberSlimes = 4;   
                 numberGoldPieces = 10;
-                numberDiamonds = 2;
+                numberDiamonds = 4;
                 numberPads = 3;
-                numberTowers = 2;  // Fixed for all levels
-                // For medium, use first 5 colors
-                allAvailableColors = {"Red", "Green", "Blue", "Yellow", "Purple"};
                 break;
             case HARD:
+				levelStartPosition = Vector3(50, 0, -90.0f); // Start in a corner
                 numberSpiders = 8;
                 numberSlimes = 6;   
                 numberGoldPieces = 15;
                 numberDiamonds = 4;
                 numberPads = 3;
-                numberTowers = 4;  // More towers in hard level
-                // For hard, use all colors
-                allAvailableColors = {"Red", "Green", "Blue", "Yellow", "Purple", "Orange", "Pink"};
                 break;
         }
-    }
+        
+        // sync the player to the  start position
+        resetToStart();
+    }   
     
-   
-	void resetColorPuzzle() {
-		padColors.clear();
-		
-		// Determine the solution color (random from available colors)
-		//std::string solutionColor = allAvailableColors[rand() % allAvailableColors.size()];
-	    solutionColor = allAvailableColors[rand() % allAvailableColors.size()];
-		std::cout << "Color Puzzle Solution: " << solutionColor << std::endl;
-		
-		// Create pads with DIFFERENT initial colors but ALL containing the solution
-		for (size_t i = 0; i < pads.size(); ++i) {
-			PadColor padColor;
-			
-			// Create 3 unique colors - make sure they're different from each other
-			std::set<std::string> selectedColors;
-			
-			// Add solution color first
-			selectedColors.insert(solutionColor);
-			
-			// Add 2 more different random colors (not duplicates)
-			while (selectedColors.size() < 3 && selectedColors.size() < allAvailableColors.size()) {
-				std::string randomColor = allAvailableColors[rand() % allAvailableColors.size()];
-				if (selectedColors.find(randomColor) == selectedColors.end()) {
-					selectedColors.insert(randomColor);
-				}
-			}
-			
-			// Final safeguard to ensure 3 colors
-			while (selectedColors.size() < 3) {
-				std::string randomColor = allAvailableColors[rand() % allAvailableColors.size()];
-				if (selectedColors.find(randomColor) == selectedColors.end()) {
-					selectedColors.insert(randomColor);
-				}
-			}
-			
-			// Convert to vector for consistent storage
-			padColor.colors.clear();
-			for (const auto& color : selectedColors) {
-				padColor.colors.push_back(color);
-			}
-			
-			// Shuffle the colors so that the initial display isn't always the solution
-			// Fixed: Using std::shuffle instead of deprecated std::random_shuffle
-			std::shuffle(padColor.colors.begin(), padColor.colors.end(), std::default_random_engine(rand()));
-			
-			// Set current index to 0 (first displayed color)
-			padColor.currentColorIndex = 0;
-			padColors.push_back(padColor);
-		}
-		
-		// This will now show different initial colors for each pad
-		std::cout << "Initial display colors: ";
-		for (size_t i = 0; i < padColors.size(); ++i) {
-			std::cout << "Pad " << i << ": " << padColors[i].colors[padColors[i].currentColorIndex] << " ";
-		}
-		std::cout << std::endl;
-		
-		// Print all colors for debugging
-		std::cout << "All color sets: ";
-		for (size_t i = 0; i < padColors.size(); ++i) {
-			std::cout << "Pad " << i << ": ";
-			for (const auto& color : padColors[i].colors) {
-				std::cout << color << " ";
-			}
-			std::cout << "| Current: " << padColors[i].colors[padColors[i].currentColorIndex] << " ";
-		}
-		std::cout << std::endl;
-	}
-	
-	//fisher-yates shuffle
-	void resetColorPuzzleFisherYates() {
-    padColors.clear();
-    
-    // Determine the solution color (random from available colors)
-    solutionColor = allAvailableColors[rand() % allAvailableColors.size()];
-    std::cout << "Color Puzzle Solution: " << solutionColor << std::endl;
-    
-    // Create pads with DIFFERENT initial colors but ALL containing the solution
-    for (size_t i = 0; i < pads.size(); ++i) {
-        PadColor padColor;
-        
-        // Create 3 unique colors - make sure they're different from each other
-        std::set<std::string> selectedColors;
-        
-        // Add solution color first
-        selectedColors.insert(solutionColor);
-        
-        // Add 2 more different random colors (not duplicates)
-        while (selectedColors.size() < 3 && selectedColors.size() < allAvailableColors.size()) {
-            std::string randomColor = allAvailableColors[rand() % allAvailableColors.size()];
-            if (selectedColors.find(randomColor) == selectedColors.end()) {
-                selectedColors.insert(randomColor);
-            }
-        }
-        
-        // Final safeguard to ensure 3 colors
-        while (selectedColors.size() < 3) {
-            std::string randomColor = allAvailableColors[rand() % allAvailableColors.size()];
-            if (selectedColors.find(randomColor) == selectedColors.end()) {
-                selectedColors.insert(randomColor);
-            }
-        }
-        
-        // Convert to vector for consistent storage
-        padColor.colors.clear();
-        for (const auto& color : selectedColors) {
-            padColor.colors.push_back(color);
-        }
-        
-        // Shuffle the colors using a simpler method that doesn't require random header
-        // Simple Fisher-Yates shuffle implementation
-        for (size_t j = padColor.colors.size(); j > 1; --j) {
-            size_t k = rand() % j;
-            std::swap(padColor.colors[j-1], padColor.colors[k]);
-        }
-        
-        // Set current index to 0 (first displayed color)
-        padColor.currentColorIndex = 0;
-        padColors.push_back(padColor);
-    }
-    
-    // This will now show different initial colors for each pad
-    std::cout << "Initial display colors: ";
-    for (size_t i = 0; i < padColors.size(); ++i) {
-        std::cout << "Pad " << i << ": " << padColors[i].colors[padColors[i].currentColorIndex] << " ";
-    }
-    std::cout << std::endl;
-    
-    // Print all colors for debugging
-    std::cout << "All color sets: ";
-    for (size_t i = 0; i < padColors.size(); ++i) {
-        std::cout << "Pad " << i << ": ";
-        for (const auto& color : padColors[i].colors) {
-            std::cout << color << " ";
-        }
-        std::cout << "| Current: " << padColors[i].colors[padColors[i].currentColorIndex] << " ";
-    }
-    std::cout << std::endl;
-}	
-	
-    void reset() {
-        playerPosition = Vector3(0, 0, -14.0f);
-        playerAngle = 0.0f;
+    void resetToStart() {
+        playerPosition = levelStartPosition;
+        playerAngle = 0.0f; // Reset to face North
         playerHeight = 1.0f;
-        playerAlive = true; 
+        playerPitch=0.0f;
         onTower = false;
-        towerHeight = 0.0f;
-        towerJumpReady = false;  
-        canJump = false;  // Reset jump ability
+		playerAlive = true; 
+        onTower = false;        
         collectedDiamonds = 0;
-        goldCount = 0;
-        resetColorPuzzle();
-        generateLevel();       
-    }
+        goldCount = 0; 
+        generateLevel(); 
+    }   
     
-    void resetToOriginal() {
-        playerPosition = originalPosition;
-        playerAngle = originalAngle;
+    void teleport() {
+        playerPosition = levelStartPosition;
+        playerAngle = 0.0f; // Reset to face North
         playerHeight = 1.0f;
-        playerAlive = true; 
+        playerPitch=0.0f;
         onTower = false;
-        towerHeight = 0.0f;
-        towerJumpReady = false;
-        canJump = false;  // Reset jump ability
-        flipView = false;       
-        resetColorPuzzle();
+		playerAlive = true; 
+        onTower = false;  
+    }      
+   
+   
+//======================================================================
+// Generate game level
+//======================================================================
+
+void generateLevel() {    
+    // Clear everything
+    goldPieces.clear();
+    spiders.clear();
+    trees.clear();
+    bullets.clear();
+    towers.clear();
+    treasuretowers.clear(); // Ensure this is cleared!
+    slimes.clear();
+    diamondPieces.clear();      
+    wasps.clear();        
+
+    //Create trees (Fixed positions)
+    if (currentLevel == EASY) {
+        trees.emplace_back(Vector3(15, 0, 15));
+        trees.emplace_back(Vector3(-15, 0, 15));
+        trees.emplace_back(Vector3(15, 0, -15));
+        trees.emplace_back(Vector3(-15, 0, -15));
+    } else if (currentLevel == MEDIUM) {
+        trees.emplace_back(Vector3(15, 0, 15));
+        trees.emplace_back(Vector3(-15, 0, 15));
+        trees.emplace_back(Vector3(15, 0, -15));
+        trees.emplace_back(Vector3(-15, 0, -15));
+        trees.emplace_back(Vector3(30, 0, 30));
+        trees.emplace_back(Vector3(-30, 0, 30));
+        trees.emplace_back(Vector3(30, 0, -30));
+        trees.emplace_back(Vector3(-30, 0, -30));
+    } else { // HARD
+        trees.emplace_back(Vector3(15, 0, 15));
+        trees.emplace_back(Vector3(-15, 0, 15));
+        trees.emplace_back(Vector3(15, 0, -15));
+        trees.emplace_back(Vector3(-15, 0, -15));
+        trees.emplace_back(Vector3(30, 0, 30));
+        trees.emplace_back(Vector3(-30, 0, 30));
+        trees.emplace_back(Vector3(30, 0, -30));
+        trees.emplace_back(Vector3(-30, 0, -30));
+        trees.emplace_back(Vector3(45, 0, 45));
+        trees.emplace_back(Vector3(-45, 0, 45));
+        trees.emplace_back(Vector3(45, 0, -45));
+        trees.emplace_back(Vector3(-45, 0, -45));
+    }
+
+    // Create towers (Fixed positions)
+    if (currentLevel == EASY) {
+        towers.emplace_back(Vector3(0, Tower::TOWER_HEIGHT / 2.0f, 0)); // Center tower
+        towers.emplace_back(Vector3(30, Tower::TOWER_HEIGHT / 2.0f, 30)); // Diagonal tower
+    } else if (currentLevel == MEDIUM) {
+        towers.emplace_back(Vector3(-25, Tower::TOWER_HEIGHT / 2.0f, -25)); // Bottom left
+        towers.emplace_back(Vector3(25, Tower::TOWER_HEIGHT / 2.0f, -25)); // Bottom right
+        towers.emplace_back(Vector3(25, Tower::TOWER_HEIGHT / 2.0f, 25)); // Top right
+    } else { // HARD
+        towers.emplace_back(Vector3(-30, Tower::TOWER_HEIGHT / 2.0f, -30)); // Bottom left
+        towers.emplace_back(Vector3(30, Tower::TOWER_HEIGHT / 2.0f, -30)); // Bottom right
+        towers.emplace_back(Vector3(30, Tower::TOWER_HEIGHT / 2.0f, 30)); // Top right
+        towers.emplace_back(Vector3(-30, Tower::TOWER_HEIGHT / 2.0f, 30)); // Top left
+    }
+
+    // Create treasure towers (Fixed positions)
+    if (currentLevel == EASY) {
+        treasuretowers.emplace_back(Vector3(10, TreasureTower::TOWER_HEIGHT / 2.0f, 10));
+    } else if (currentLevel == MEDIUM) {
+        treasuretowers.emplace_back(Vector3(-15, TreasureTower::TOWER_HEIGHT / 2.0f, 15));
+        treasuretowers.emplace_back(Vector3(15, TreasureTower::TOWER_HEIGHT / 2.0f, -15));
+    } else { // HARD
+        treasuretowers.emplace_back(Vector3(-20, TreasureTower::TOWER_HEIGHT / 2.0f, 20));
+        treasuretowers.emplace_back(Vector3(20, TreasureTower::TOWER_HEIGHT / 2.0f, -20));
+        treasuretowers.emplace_back(Vector3(0, TreasureTower::TOWER_HEIGHT / 2.0f, 0));
+    }
+
+    // Diamonds for Standard Towers (Roof)
+    for (const auto& tower : towers) {
+        Vector3 roofPos(tower.position.x, tower.position.y + (Tower::TOWER_HEIGHT / 2.0f) + 0.5f, tower.position.z);
+        DiamondPiece roofDiamond(roofPos);
+        roofDiamond.setIsOnTower(true);
+        diamondPieces.push_back(roofDiamond);
+    }
+
+    // Diamonds for Treasure Towers
+    for (const auto& tt : treasuretowers) {
+        // Ground level diamond (on the floor)
+        DiamondPiece groundDiamond(Vector3(tt.position.x, 1.0f, tt.position.z)); // Inside (Ground) 
+        groundDiamond.setIsOnTower(false);
+        diamondPieces.push_back(groundDiamond);
+        
+        // Rooftop diamond (on the roof floor - Height 6.0)	
+        DiamondPiece roofDiamond(Vector3(tt.position.x, 6.1f, tt.position.z)); // Rooftop (Roof is 6.0, Diamond is at 6.1)
+        roofDiamond.setIsOnTower(true);
+        diamondPieces.push_back(roofDiamond);
+    }
+
+    // Create gold pieces - Fixed: Check for valid positions to avoid towers
+    int createdGold = 0;
+    while (createdGold < numberGoldPieces) {
+        float x = (rand() % 30) - 15;
+        float z = (rand() % 30) - 15;
+
+        // Check if this position is inside any tower or treasure tower
+        bool inTower = false;
+        
+        // Check standard towers
+        for (const auto& tower : towers) {
+            float halfWidth = Tower::TOWER_WIDTH / 2.0f;
+            float halfDepth = Tower::TOWER_DEPTH / 2.0f;
+
+            if (x >= tower.position.x - halfWidth && x <= tower.position.x + halfWidth &&
+                z >= tower.position.z - halfDepth && z <= tower.position.z + halfDepth) {
+                inTower = true;
+                break;
+            }
+        }
+
+        // Check treasure towers
+        for (const auto& tt : treasuretowers) {
+            float halfWidth = TreasureTower::TOWER_WIDTH / 2.0f;
+            float halfDepth = TreasureTower::TOWER_DEPTH / 2.0f;
+
+            if (x >= tt.position.x - halfWidth && x <= tt.position.x + halfWidth &&
+                z >= tt.position.z - halfDepth && z <= tt.position.z + halfDepth) {
+                inTower = true;
+                break;
+            }
+        }
+
+        // Only place gold piece if not inside a tower
+        if (!inTower) {
+            goldPieces.emplace_back(Vector3(x, 0, z));
+            createdGold++;
+        }
+    }  
+
+    
+    // Spiders (Safe placement - avoid towers)
+    for (int i = 0; i < numberSpiders; ++i) {
+        float x, z;
+        bool valid = false;
+        
+        // Keep trying until we find a valid location that's not inside any tower
+        while (!valid) {
+            x = (rand() % 90) - 45;
+            z = (rand() % 90) - 45;
+            
+            valid = true;
+            
+            // Check against standard towers
+            for (const auto& t : towers) {
+                if (abs(x - t.position.x) < (Tower::TOWER_WIDTH/2.0f + 1.0f) && 
+                    abs(z - t.position.z) < (Tower::TOWER_DEPTH/2.0f + 1.0f)) {
+                    valid = false;
+                    break;
+                }
+            }
+            
+            // Check against treasure towers
+            for (const auto& tt : treasuretowers) {
+                if (abs(x - tt.position.x) < (TreasureTower::TOWER_WIDTH/2.0f + 1.0f) && 
+                    abs(z - tt.position.z) < (TreasureTower::TOWER_DEPTH/2.0f + 1.0f)) {
+                    valid = false;
+                    break;
+                }
+            }
+        }
+        
+        spiders.emplace_back(Vector3(x, 0.0f, z)); //y=0.5 creates low level flying spiders
     }
     
-    void generateLevel() {       
+    // Slimes (Safe placement - avoid towers)
+    for (int i = 0; i < numberSlimes; ++i) {
+        float x, z;
+        bool valid = false;
         
-        goldPieces.clear();
-        spiders.clear();
-        trees.clear();
-        bullets.clear();
-        towers.clear();
-        slimes.clear();
-        diamondPieces.clear();  
-        pads.clear();  
-        
-        // Create trees in corners
-        trees.emplace_back(Vector3(6, 0, 6));
-        trees.emplace_back(Vector3(-6, 0, 6));
-        trees.emplace_back(Vector3(6, 0, -6));
-        trees.emplace_back(Vector3(-6, 0, -6));
-
-        // Create gold pieces
-        for (int i = 0; i < numberGoldPieces; ++i) {
-            float x = (rand() % 30) - 15;
-            float z = (rand() % 30) - 15;
-            goldPieces.emplace_back(Vector3(x, 0, z));
-        }
-
-        // Create spiders
-        for (int i = 0; i < numberSpiders; ++i) {
-            float x = (rand() % 30) - 15;
-            float z = (rand() % 30) - 15;
-            spiders.emplace_back(Vector3(x, 0, z));
-        }
-
-        // Create slimes
-        for (int i = 0; i < numberSlimes; ++i) {
-            float x = (rand() % 30) - 15;
-            float z = (rand() % 30) - 15;
-            slimes.emplace_back(Vector3(x, 0, z));
-        }
-                   
-       for (int i = 0; i < numberPads; ++i) {
-			// Position them behind the first tower (at x=-20, z=4)
-			float x = -25.0f - i * 3.0f;  // Position behind the first tower
-			float z = 4.0f + 1.0f;        // Slightly in front of tower to make them visible
-			pads.emplace_back(Vector3(x, 0, z));  // Y = 0 for ground level
-		}
-       
-        // Create towers (using numberTowers variable)
-        towers.emplace_back(Vector3(-20, 0, 4));
-        towers.emplace_back(Vector3(-30, 0, 2));  
-        
-        // In hard level, add more towers
-        if (currentLevel == HARD) {
-            towers.emplace_back(Vector3(-10, 0, -10));
-            towers.emplace_back(Vector3(5, 0, 15));
+        // Keep trying until we find a valid location that's not inside any tower
+        while (!valid) {
+            x = (rand() % 80) - 40;
+            z = (rand() % 80) - 40;
+            
+            valid = true;
+            
+            // Check against standard towers
+            for (const auto& t : towers) {
+                if (abs(x - t.position.x) < (Tower::TOWER_WIDTH/2.0f + 1.0f) && 
+                    abs(z - t.position.z) < (Tower::TOWER_DEPTH/2.0f + 1.0f)) {
+                    valid = false;
+                    break;
+                }
+            }
+            
+            // Check against treasure towers
+            for (const auto& tt : treasuretowers) {
+                if (abs(x - tt.position.x) < (TreasureTower::TOWER_WIDTH/2.0f + 1.0f) && 
+                    abs(z - tt.position.z) < (TreasureTower::TOWER_DEPTH/2.0f + 1.0f)) {
+                    valid = false;
+                    break;
+                }
+            }
         }
         
-        // Add diamond pieces on top of each tower
-        diamondPieces.clear();
-        for (const auto& tower : towers) {
-            Vector3 diamondPos(tower.position.x, tower.position.y + Tower::TOWER_HEIGHT/2 + DiamondPiece::DIAMOND_OFFSET, tower.position.z);
-            diamondPieces.emplace_back(diamondPos);
-        }
-        
-         // Initialize color combinations for pads
-        resetColorPuzzle();
+        slimes.emplace_back(Vector3(x, 0.0f, z)); //y=0.0 
+    }
+    
+    // Wasps (Hovering logic - on top of all towers)
+    for (long unsigned int i = 0; i < towers.size(); ++i) {
+        Vector3 waspPos(towers[i].position.x, 
+                        towers[i].position.y + (Tower::TOWER_HEIGHT / 2.0f) + 4.0f, 
+                        towers[i].position.z);
+        wasps.emplace_back(Wasp(waspPos));
     }  
+    
+    // Wasps on treasure towers
+    for (long unsigned int i = 0; i < treasuretowers.size(); ++i) {
+        Vector3 waspPos(treasuretowers[i].position.x, 
+                        treasuretowers[i].position.y + (TreasureTower::TOWER_HEIGHT / 2.0f) + 4.0f, 
+                        treasuretowers[i].position.z);
+        wasps.emplace_back(Wasp(waspPos));
+    }
+}
+
+//======================================================================
     
     void moveForward(float d)  { playerPosition.x += sin(playerAngle) * d; playerPosition.z += cos(playerAngle) * d; }
     void moveBackward(float d) { playerPosition.x -= sin(playerAngle) * d; playerPosition.z -= cos(playerAngle) * d; }
     void turnLeft(float a)     { playerAngle += a; }
     void turnRight(float a)    { playerAngle -= a; }
     
-    void updateBullets() {
-        for (auto& b : bullets) if (b.active) b.update();
+    void rotate(float angle) {
+        playerAngle += angle;
+        // Normalize angle to keep it between 0 and 2*PI
+        if (playerAngle < 0) playerAngle += 2.0f * M_PI;
+        if (playerAngle > 2.0f * M_PI) playerAngle -= 2.0f * M_PI;
+    }
+    
+    
+    void updateBullets(float dt) {
+        for (auto& b : bullets) if (b.active) b.update(dt);
         bullets.erase(std::remove_if(bullets.begin(), bullets.end(),
             [](const Bullet& b){ return !b.active; }), bullets.end());      
     }
     
     Vector3 randomPosition() const {
-        // For now: uniformly in a square [-10,10] x [-10,10] on the XZ plane
+        // uniformly in a square [-10,10] x [-10,10] on the XZ plane
         float x = (rand() / (float)RAND_MAX) * 20.0f - 10.0f;
         float z = (rand() / (float)RAND_MAX) * 20.0f - 10.0f;
         return Vector3(x, 0.0f, z);
     }
 
     void spawnSpider() {
-        spiders.emplace_back(randomPosition());
+        // Spawn spider at valid position outside towers
+        float x, z;
+        bool valid = false;
+        
+        while (!valid) {
+            x = (rand() % 90) - 45;
+            z = (rand() % 90) - 45;
+            
+            valid = true;
+            
+            // Check against standard towers
+            for (const auto& t : towers) {
+                if (abs(x - t.position.x) < (Tower::TOWER_WIDTH/2.0f + 1.0f) && 
+                    abs(z - t.position.z) < (Tower::TOWER_DEPTH/2.0f + 1.0f)) {
+                    valid = false;
+                    break;
+                }
+            }
+            
+            // Check against treasure towers
+            for (const auto& tt : treasuretowers) {
+                if (abs(x - tt.position.x) < (TreasureTower::TOWER_WIDTH/2.0f + 1.0f) && 
+                    abs(z - tt.position.z) < (TreasureTower::TOWER_DEPTH/2.0f + 1.0f)) {
+                    valid = false;
+                    break;
+                }
+            }
+        }
+        
+        spiders.emplace_back(Vector3(x, 0.0f, z));
     }    
     
     Vector3 randomPosition() {
         return Vector3((rand() % 30) - 15, 0, (rand() % 30) - 15);
-    }
+    }  
     
-    // Check if player is over a specific pad
-    int getPlayerOverPadIndex() {
-        for (size_t i = 0; i < pads.size(); ++i) {
-            const auto& pad = pads[i];
-            float dx = playerPosition.x - pad.position.x;
-            float dz = playerPosition.z - pad.position.z;
-            float distance = sqrt(dx*dx + dz*dz);
-            
-            // Check if player is close enough to the pad (adjust threshold as needed)
-            if (distance < 2.0f) {  // 2.0f is the pad detection radius
-                return static_cast<int>(i);
-            }
-        }
-        return -1;  // Not over any pad
-    }
-    
-    // Check if puzzle is solved (all pads have same color)
-    bool checkColorPuzzleSolved() {
-        if (padColors.empty()) return false;
-        
-        std::string firstColor = padColors[0].colors[padColors[0].currentColorIndex];
-        for (size_t i = 1; i < padColors.size(); ++i) {
-            if (padColors[i].colors[padColors[i].currentColorIndex] != firstColor) {
-                return false;
-            }
-        }
-        return true;
-    }
-    
-    // Cycle color on a specific pad
-    void cyclePadColor(int padIndex) {
-        if (padIndex >= 0 && padIndex < static_cast<int>(padColors.size())) {
-            padColors[padIndex].currentColorIndex++;
-            if (padColors[padIndex].currentColorIndex >= static_cast<int>(padColors[padIndex].colors.size())) {
-                padColors[padIndex].currentColorIndex = 0;
-            }
-        }
-    }
-    
-    // Get current color of a pad
-    std::string getCurrentPadColor(int padIndex) {
-        if (padIndex >= 0 && padIndex < static_cast<int>(padColors.size()) && 
-            !padColors[padIndex].colors.empty()) {
-            return padColors[padIndex].colors[padColors[padIndex].currentColorIndex];
-        }
-        return "Unknown";
-    }
-    
-    // Get color RGB values from color name
-    std::vector<float> getColorRGB(const std::string& colorName) {
-        if (colorName == "Red") return {1.0f, 0.0f, 0.0f};
-        if (colorName == "Green") return {0.0f, 1.0f, 0.0f};
-        if (colorName == "Blue") return {0.0f, 0.0f, 1.0f};
-        if (colorName == "Yellow") return {1.0f, 1.0f, 0.0f};
-        if (colorName == "Purple") return {0.5f, 0.0f, 0.5f};
-        if (colorName == "Orange") return {1.0f, 0.5f, 0.0f};
-        if (colorName == "Pink") return {1.0f, 0.75f, 0.8f};
-        return {1.0f, 0.0f, 0.0f}; // Default to red
-    }
-    
-    // Check if all pads have same color (puzzle solved)
-    bool isAllPadsSameColor() {
-        if (padColors.empty()) return false;
-        
-        std::string firstColor = padColors[0].colors[padColors[0].currentColorIndex];
-        for (size_t i = 1; i < padColors.size(); ++i) {
-            if (padColors[i].colors[padColors[i].currentColorIndex] != firstColor) {
-                return false;
-            }
-        }
-        return true;
-    }
 };
 
 GameState gameState;
@@ -1053,291 +679,348 @@ GameState gameState;
 
 //======================================================================
 void updateSpiderAI() {
+    if (!gameState.playerAlive) return;
+
     for (auto& s : gameState.spiders) {
-        if (!s.alive || s.hitCount >= 4) continue;
+        if (!s.alive) continue;
 
-        Vector3 dir = gameState.playerPosition - s.position;
-        float dist = std::sqrt(dir.x*dir.x + dir.z*dir.z);
+        // Calculate 2D distance to player
+        float dx = gameState.playerPosition.x - s.position.x;
+        float dz = gameState.playerPosition.z - s.position.z;
+        float dist = sqrt(dx * dx + dz * dz);
 
-        // Set chasing flag so Spider::update() skips walking
+        // Update chasing state
         s.chasing = (dist < SPIDER_CHASE_DISTANCE);
 
-        if (s.chasing) {
-            // Normalize direction (only X/Z)
-            dir.x /= dist; dir.z /= dist;
-            s.position += dir * s.speed * 0.5f;
+        if (s.chasing && dist > 0.5f) {
+            // Move toward player
+            s.position.x += (dx / dist) * s.speed * 0.5f;
+            s.position.z += (dz / dist) * s.speed * 0.5f;
+
+            // Face the player
+            s.angle = atan2(dx, dz) * 180.0f / M_PI;
+        } else {
+            // Idle behavior: slowly wander forward in current direction
+            float rad = s.angle * M_PI / 180.0f;
+            s.position.x += sin(rad) * s.speed * 0.1f;
+            s.position.z += cos(rad) * s.speed * 0.1f;
+
+            // Randomly turn slightly to simulate wandering
+            if (rand() % 100 < 5) {
+                s.angle += (rand() % 30 - 15);
+            }
         }
 
-        // Random walk component – applied only when not chasing
-        if (!s.chasing)
-            s.angle += (rand() % 100 - 50) * 0.001f;
+        // Collision with player
+        if (dist < 1.2f && abs(gameState.playerPosition.y - 1.5f) < 1.0f) {
+            gameState.playerAlive = false;
+        }
     }
 }
+
+void updateSlimeAI() {
+    for (auto& s : gameState.slimes) {
+        if (!s.alive) continue;
+
+        // Slimes stay on the ground (Y=0)
+        s.position.y = 0.0f; 
+
+        float dx = gameState.playerPosition.x - s.position.x;
+        float dz = gameState.playerPosition.z - s.position.z;
+        float dist = sqrt(dx*dx + dz*dz);
+
+        if (dist < SLIME_CHASE_DISTANCE && dist > 0.5f) {
+            s.position.x += (dx / dist) * s.speed;
+            s.position.z += (dz / dist) * s.speed;
+        }
+
+        // Only kill player if player is actually near the ground
+        if (dist < 1.5f && gameState.playerPosition.y < 3.0f) {
+            gameState.playerAlive = false;
+        }
+    }
+}
+
 //======================================================================
-void drawRadar() {
-    if (!showRadar) return;    
-    //more work needed on radar
-    // Save current state
-    glPushMatrix();    
-    glPushAttrib(GL_LIGHTING); // Save lighting state
+
+void drawLevelComplete() {
+    // Switch to 2D Projection
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    // Darken background slightly
+    glColor4f(0.0f, 0.0f, 0.0f, 0.5f);
+    glBegin(GL_QUADS);
+        glVertex2f(0, 0);
+        glVertex2f(WINDOW_WIDTH, 0);
+        glVertex2f(WINDOW_WIDTH, WINDOW_HEIGHT);
+        glVertex2f(0, WINDOW_HEIGHT);
+    glEnd();
+
+    // Draw Text
+    glColor3f(1.0f, 1.0f, 0.0f); // Gold
+    const char* message = "LEVEL COMPLETE!";
+    const char* subMessage = "All Diamonds Collected. Press 'X' to Restart.";
     
-    // Disable lighting for 2D overlay
+    // Position text in middle (roughly)
+    glRasterPos2f(WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 + 20);
+    for (int i = 0; message[i] != '\0'; i++) 
+        glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_24, message[i]);
+
+    glRasterPos2f(WINDOW_WIDTH / 2 - 150, WINDOW_HEIGHT / 2 - 20);
+    for (int i = 0; subMessage[i] != '\0'; i++) 
+        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, subMessage[i]);
+
+    // Restore 3D
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+//======================================================================
+
+void renderHUD() {
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0);     
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+
+    // 2. Draw Black Banner at TOP (Y=0 to Y=100)
+    glColor3f(0.0f, 0.0f, 0.0f);
+    glBegin(GL_QUADS);
+        glVertex2f(0, 0);
+        glVertex2f(WINDOW_WIDTH, 0);
+        glVertex2f(WINDOW_WIDTH, 100);
+        glVertex2f(0, 100);
+    glEnd();
+
+    // 3. Draw Text (Adjusted Y positions)
+    glColor3f(1.0f, 1.0f, 1.0f); 
+    char buf[256];    
+    sprintf(buf, "GOLD: %d/%d  |  DIAMONDS: %d/%d  |  FPS: %.1f", 
+            gameState.goldCount, gameState.numberGoldPieces,
+            gameState.collectedDiamonds, gameState.numberDiamonds, fps);    
+    glRasterPos2f(20, 40); // Moved to top
+    for (int i = 0; buf[i]; i++) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, buf[i]);
+
+    // Show level properly with all three levels
+    const char* levelStr;
+    switch(gameState.currentLevel) {
+        case GameState::EASY:   levelStr = "EASY"; break;
+        case GameState::MEDIUM: levelStr = "MEDIUM"; break;
+        case GameState::HARD:   levelStr = "HARD"; break;
+        default:                levelStr = "UNKNOWN"; break;
+    }
+    
+    sprintf(buf, "LEVEL: %s  |  PLAYER: %s", levelStr, (gameState.playerAlive ? "ALIVE" : "DEAD"));
+    glRasterPos2f(20, 70); // Moved to top
+    for (int i = 0; buf[i]; i++) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_12, buf[i]);  
+     
+    bool levelComplete = (gameState.goldCount >= gameState.numberGoldPieces && 
+                          gameState.collectedDiamonds >= gameState.numberDiamonds);    
+    if (levelComplete) drawLevelComplete();
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+void drawWeapon() {
+    glDisable(GL_DEPTH_TEST);
     glDisable(GL_LIGHTING);
     
-    // Set up projection matrix
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-    glOrtho(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0, -5, 5);  // Screen coordinates (0,0 at top-left)    
-    //// Set up modelview matrix
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();     
-    // player position (center of radar)
-    
-    // Draw spider positions on radar (black)
-    glColor3f(0.0f, 0.0f, 0.0f);  // Black for spiders
-    glPointSize(6.0f);
-    glBegin(GL_POINTS);
-    for (const auto& spider : gameState.spiders) {
-        if (spider.alive) {
-            float dx = spider.position.x - gameState.playerPosition.x;
-            float dz = spider.position.z - gameState.playerPosition.z;            
-            // Convert world coordinates to radar coordinates (change sign)
-            float radarX = 50 - dx * radarScale * 100;
-            float radarZ = 50 - dz * radarScale * 100;            
-            glVertex2f(radarX, radarZ);
-        }
-    }
-    glEnd(); 
-    
-    // Draw slime positions on radar (red)
-    glColor3f(1.0f, 0.0f, 0.0f);  // Red for slimes
-    glPointSize(6.0f);
-    glBegin(GL_POINTS);
-    for (const auto& slime : gameState.slimes) {
-        if (slime.alive) {
-            float dx = slime.position.x - gameState.playerPosition.x;
-            float dz = slime.position.z - gameState.playerPosition.z;            
-            // Convert world coordinates to radar coordinates (change sign)
-            float radarX = 50 - dx * radarScale * 100;
-            float radarZ = 50 - dz * radarScale * 100;            
-            glVertex2f(radarX, radarZ);
-        }
-    }
-    glEnd(); 
-    
-    //Draw radar grid lines
-    glColor3f(0.0f, 0.0f, 0.0f);  // black for visibility
+    glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
+    gluOrtho2D(0, WINDOW_WIDTH, WINDOW_HEIGHT, 0); 
+    glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
+
+    float centerX = WINDOW_WIDTH / 2.0f;
+    float bottomY = WINDOW_HEIGHT;
+
+    // Draw Crosshair
+    glColor3f(0.0f, 1.0f, 0.0f);
+    glLineWidth(2.0f);
     glBegin(GL_LINES);
-    for (int i = 0; i < 8; i++) {
-        float angle = (float)i * M_PI / 4.0f;
-        glVertex2f(50, 50);
-        glVertex2f(50 + cos(angle) * 40, 50 + sin(angle) * 40);
+        glVertex2f(centerX - 10, WINDOW_HEIGHT/2); glVertex2f(centerX + 10, WINDOW_HEIGHT/2);
+        glVertex2f(centerX, WINDOW_HEIGHT/2 - 10); glVertex2f(centerX, WINDOW_HEIGHT/2 + 10);
+    glEnd();
+        
+    float aimOffset = gameState.playerPitch * 40.0f; // Reduced sensitivity
+    glColor3f(0.5f, 0.5f, 0.5f);
+    glBegin(GL_QUADS);
+        glVertex2f(centerX - 20, bottomY);
+        glVertex2f(centerX + 20, bottomY);
+        glVertex2f(centerX + 15, bottomY - 80 + aimOffset); // 80 is much shorter than 150
+        glVertex2f(centerX - 15, bottomY - 80 + aimOffset);
+    glEnd();
+
+    glMatrixMode(GL_PROJECTION); glPopMatrix();
+    glMatrixMode(GL_MODELVIEW); glPopMatrix();
+    glEnable(GL_LIGHTING);
+    glEnable(GL_DEPTH_TEST);
+}
+//======================================================================
+
+void renderMap() {
+    if (!gameState.showMap) return;
+
+    // Switch to 2D Overlay
+    glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
+    gluOrtho2D(0, WINDOW_WIDTH, 0, WINDOW_HEIGHT);
+    glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
+
+    glDisable(GL_LIGHTING); glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    float mapSize = 350.0f; 
+    float margin = 20.0f;
+    float xOff = margin;
+    float yOff = margin;
+
+    //  Map Background & Border
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    glBegin(GL_QUADS);
+        glVertex2f(xOff, yOff); glVertex2f(xOff + mapSize, yOff);
+        glVertex2f(xOff + mapSize, yOff + mapSize); glVertex2f(xOff, yOff + mapSize);
+    glEnd();
+
+    glColor3f(0.0f, 0.0f, 0.0f); glLineWidth(2.0f);
+    glBegin(GL_LINE_LOOP);
+        glVertex2f(xOff, yOff); glVertex2f(xOff + mapSize, yOff);
+        glVertex2f(xOff + mapSize, yOff + mapSize); glVertex2f(xOff, yOff + mapSize);
+    glEnd();
+
+    // North Indicator
+    glRasterPos2f(xOff + (mapSize / 2.0f) - 5.0f, yOff + mapSize + 5.0f);
+    glutBitmapCharacter(GLUT_BITMAP_HELVETICA_12, 'N');
+
+    auto toMapX = [&](float x) { return xOff + (x + 100.0f) / 200.0f * mapSize; };
+    auto toMapY = [&](float z) { return yOff + (z + 100.0f) / 200.0f * mapSize; };
+    
+    
+    // PLAYER & DIRECTION STICK
+    float px = toMapX(gameState.playerPosition.x);
+    float py = toMapY(gameState.playerPosition.z);
+    float pSize = 8.0f;
+    float lineLen = pSize * 2.5f;
+    float hx = px - sin(gameState.playerAngle) * lineLen; 
+    float hy = py + cos(gameState.playerAngle) * lineLen; 
+
+    glColor3f(0.0f, 0.0f, 0.0f); glLineWidth(3.0f);
+    glBegin(GL_LINES); glVertex2f(px, py); glVertex2f(hx, hy); glEnd();
+
+    glColor3f(0.0f, 0.8f, 0.0f);
+    glBegin(GL_QUADS);
+        glVertex2f(px - pSize, py - pSize); glVertex2f(px + pSize, py - pSize);
+        glVertex2f(px + pSize, py + pSize); glVertex2f(px - pSize, py + pSize);
+    glEnd();
+
+    // DRAW TOWERS AS RECTANGLES 
+    float tSize = 10.0f; // Visual size of the tower on the map
+    glColor3f(0.6f, 0.6f, 0.6f); 
+    for (const auto& t : gameState.towers) {
+        float tx = toMapX(t.position.x);
+        float ty = toMapY(t.position.z);
+        glBegin(GL_QUADS);
+            glVertex2f(tx - tSize, ty - tSize); glVertex2f(tx + tSize, ty - tSize);
+            glVertex2f(tx + tSize, ty + tSize); glVertex2f(tx - tSize, ty + tSize);
+        glEnd();
     }
-    glEnd();  
-     // Draw radar circle - this should be visible
-    glColor3f(1.0f, 1.0f, 1.0f);  // white
-    glBegin(GL_TRIANGLE_FAN);
-    glVertex2f(50, 50);  // Center of radar (top-left corner)
-    for (int i = 0; i <= 32; i++) {
-        float angle = (float)i * 2.0f * M_PI / 32.0f;
-        glVertex2f(50 + cos(angle) * 40, 50 + sin(angle) * 40);
+    // Treasure Towers (Darker Red blocks)
+    glColor3f(0.4f, 0.0f, 0.0f);
+    for (const auto& tt : gameState.treasuretowers) {
+        float tx = toMapX(tt.position.x);
+        float ty = toMapY(tt.position.z);
+        glBegin(GL_QUADS);
+            glVertex2f(tx - tSize, ty - tSize); glVertex2f(tx + tSize, ty - tSize);
+            glVertex2f(tx + tSize, ty + tSize); glVertex2f(tx - tSize, ty + tSize);
+        glEnd();
     }
-    glEnd();  
+
+    // DRAW ITEMS 
+    glPointSize(10.0f); 
+    glBegin(GL_POINTS);
+        glColor3f(0.9f, 0.7f, 0.0f); // Gold
+        for (const auto& g : gameState.goldPieces) glVertex2f(toMapX(g.position.x), toMapY(g.position.z));
+        
+        glColor3f(0.0f, 0.9f, 1.0f); // Diamonds
+        for (const auto& d : gameState.diamondPieces) glVertex2f(toMapX(d.position.x), toMapY(d.position.z));
+    glEnd();
+
+    // DRAW ENEMIES
+    glPointSize(8.0f);
+    glBegin(GL_POINTS);
+        glColor3f(1.0f, 0.0f, 0.0f); // Spiders, Slimes, Wasps
+        for (const auto& s : gameState.spiders) if (s.alive) glVertex2f(toMapX(s.position.x), toMapY(s.position.z));
+        for (const auto& sl : gameState.slimes) if (sl.alive) glVertex2f(toMapX(sl.position.x), toMapY(sl.position.z));
+        for (const auto& w : gameState.wasps) if (w.alive) glVertex2f(toMapX(w.position.x), toMapY(w.position.z));
+    glEnd();
    
-   // Restore matrices
-    glPopMatrix();
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();    
-    glPopAttrib(); // Restore lighting state
+
+    // LEGEND (Outside map)
+    float legX = xOff + mapSize + 10.0f; 
+    float currentY = yOff + 120.0f; 
+    auto drawLegendItem = [&](const char* text, float r, float g, float b, float& yPos) {
+        glColor3f(r, g, b);
+        glBegin(GL_QUADS);
+            glVertex2f(legX, yPos); glVertex2f(legX + 12, yPos);
+            glVertex2f(legX + 12, yPos + 12); glVertex2f(legX, yPos + 12);
+        glEnd();
+        glColor3f(0.0f, 0.0f, 0.0f);
+        glRasterPos2f(legX + 18, yPos + 1);
+        for (const char* c = text; *c; c++) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_10, *c);
+        yPos -= 20.0f;
+    };
+
+    drawLegendItem("PLAYER", 0.0f, 0.8f, 0.0f, currentY);
+    drawLegendItem("TOWER", 0.6f, 0.6f, 0.6f, currentY);
+    drawLegendItem("TREASURE", 0.4f, 0.0f, 0.0f, currentY);
+    drawLegendItem("GOLD", 0.9f, 0.7f, 0.0f, currentY);
+    drawLegendItem("DIAMOND", 0.0f, 0.9f, 1.0f, currentY);
+    drawLegendItem("ENEMIES", 1.0f, 0.0f, 0.0f, currentY);
+
+    glEnable(GL_DEPTH_TEST); glEnable(GL_LIGHTING);
+    glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW); glPopMatrix();
 }
 
 
-//======================================================================
-void renderHUD() {
-    // Save the current matrix state
-    glPushMatrix();
-    // Switch to 2D projection for HUD
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-    gluOrtho2D(0,  WINDOW_WIDTH, WINDOW_HEIGHT, 0); //screen coordinates
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();
-    
-     // Render gold count and player status
-    glColor3f(0.0f, 0.0f, 0.0f); // Black for HUD
-    glRasterPos2f(10, WINDOW_HEIGHT - 30);    // Top-left corner
-    
-    char hud[100];
-    sprintf(hud, "Gold Collected: %d Diamonds Collected: %d Level: %s",
-            gameState.goldCount, gameState.collectedDiamonds, 
-            (gameState.currentLevel == GameState::EASY) ? "EASY" : 
-            (gameState.currentLevel == GameState::MEDIUM) ? "MEDIUM" : "HARD");    
-    for (int i = 0; hud[i] != '\0'; ++i) {
-        glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, hud[i]);
-    }    
-      
-    // Display player status
-    if (gameState.onTower) {
-        glColor3f(0.0f, 0.0f, 0.0f); // Black for HUD
-        glRasterPos2f(10, WINDOW_HEIGHT - 60);
-        char towerMsg[100];
-        sprintf(towerMsg, "Player on top of tower");    
-        for (int i = 0; towerMsg[i] != '\0'; ++i) {
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, towerMsg[i]);
-        }
-    } else {
-        glColor3f(0.0f, 0.0f, 0.0f); // Black for HUD
-        glRasterPos2f(10, WINDOW_HEIGHT - 60);
-        char groundMsg[100];
-        sprintf(groundMsg, "Player at ground level");    
-        for (int i = 0; groundMsg[i] != '\0'; ++i) {
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, groundMsg[i]);
-        }
-    }
-    
-    // Show puzzle status for color combination
-    if (!gameState.canJump) {
-        glColor3f(0.0f, 0.0f, 0.0f); // Black for HUD
-        glRasterPos2f(10, WINDOW_HEIGHT - 90);
-        char puzzleMsg[100];
-        
-        if(gameState.currentLevel == GameState::EASY)        
-        sprintf(puzzleMsg, "Puzzle: Match colors on all pads so that they are all %s", gameState.solutionColor.c_str());
-        else
-        sprintf(puzzleMsg, "Puzzle: Match colors on all pads");  
-        for (int i = 0; puzzleMsg[i] != '\0'; ++i) {
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, puzzleMsg[i]);
-        }
-    }
-    
-    // Show current color combination on each pad
-    if (!gameState.canJump && gameState.padColors.size() > 0) {
-        glColor3f(0.0f, 0.0f, 0.0f); // Black for HUD
-        glRasterPos2f(10, WINDOW_HEIGHT - 120);
-        char colorMsg[200];
-        sprintf(colorMsg, "Pad Colors: ");
-        int len = strlen(colorMsg);
-        
-        for (size_t i = 0; i < gameState.padColors.size(); ++i) {
-            if (i > 0) colorMsg[len++] = ',';
-            colorMsg[len++] = ' ';
-            std::string currentColor = gameState.getCurrentPadColor(i);
-            strcpy(&colorMsg[len], currentColor.c_str());
-            len += currentColor.length();
-        }
-        colorMsg[len] = '\0';
-        
-        for (int i = 0; colorMsg[i] != '\0'; ++i) {
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, colorMsg[i]);
-        }
-    }
-    
-    // Show diamond collection status
-    if (gameState.canJump && gameState.collectedDiamonds < static_cast<int>(gameState.diamondPieces.size())) {
-        glColor3f(0.0f, 0.0f, 0.0f); // Black for HUD
-        glRasterPos2f(10, WINDOW_HEIGHT - 150);
-        char diamondMsg[100];
-        sprintf(diamondMsg, "Diamonds to collect: %d", 
-                static_cast<int>(gameState.diamondPieces.size()) - gameState.collectedDiamonds);    
-        for (int i = 0; diamondMsg[i] != '\0'; ++i) {
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, diamondMsg[i]);
-        }
-    }
-      
-     // Show puzzle solved message
-    if (gameState.canJump && gameState.isAllPadsSameColor()) {
-        glColor3f(0.0f, 0.5f, 0.0f); // Green for puzzle solved message
-        glRasterPos2f(10, WINDOW_HEIGHT - 210);
-        char puzzleSolvedMsg[100];
-        sprintf(puzzleSolvedMsg, "Color puzzle solved! Player can now jump");    
-        for (int i = 0; puzzleSolvedMsg[i] != '\0'; ++i) {
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, puzzleSolvedMsg[i]);
-        }
-    }
-    
-    // Check if level is complete - both gold and diamonds collected
-    bool levelComplete = (gameState.goldCount >= gameState.numberGoldPieces && 
-                          gameState.collectedDiamonds >= gameState.numberDiamonds);
-    
-    if (levelComplete) {
-        glColor3f(0.0f, 0.5f, 0.0f); // Green for level complete message
-        glRasterPos2f(10, WINDOW_HEIGHT - 180);
-        char levelCompleteMsg[100];
-        sprintf(levelCompleteMsg, "LEVEL COMPLETE! All assets collected!");    
-        for (int i = 0; levelCompleteMsg[i] != '\0'; ++i) {
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, levelCompleteMsg[i]);
-        }
-    }
-    
-    // Check for nearby slimes
-    bool slimeNearby = false;
-    for (const auto& slime : gameState.slimes) {
-        if (!slime.alive) continue;
-        float dist = distance(slime.position, gameState.playerPosition);
-        if (dist < 3.0f) { // If slime is within 3 units
-            slimeNearby = true;
-            break;
-        }
-    }
-    
-    if (slimeNearby) {
-        glColor3f(0.0f, 0.0f, 0.0f); // Black for HUD
-        glRasterPos2f(10, WINDOW_HEIGHT - 240);
-        char slimeMsg[100];
-        sprintf(slimeMsg, "Slime close!");    
-        for (int i = 0; slimeMsg[i] != '\0'; ++i) {
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, slimeMsg[i]);
-        }
-    }
-    
-    // Game over message
-    if (!gameState.playerAlive) {
-        glColor3f(1.0f, 0.0f, 0.0f); // Red for game over
-        glRasterPos2f(10, WINDOW_HEIGHT - 270);
-        char gameOverMsg[100];
-        sprintf(gameOverMsg, "GAME OVER PLAYER KILLED");    
-        for (int i = 0; gameOverMsg[i] != '\0'; ++i) {
-            glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, gameOverMsg[i]);
-        }
-    }
-           
-    // Restore original matrix state
-    glPopMatrix();
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();
-}
 
 //======================================================================
-      
+
 void display() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Set up 3D camera
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    if (gameState.flipView) {
-        // Flip the view by 180 degrees
-        gluLookAt(gameState.playerPosition.x, gameState.playerHeight, gameState.playerPosition.z,
-                  gameState.playerPosition.x + sin(gameState.playerAngle + M_PI), gameState.playerHeight,
-                  gameState.playerPosition.z + cos(gameState.playerAngle + M_PI),
-                  0.0f, 1.0f, 0.0f);
-    } else {
-        gluLookAt(gameState.playerPosition.x, gameState.playerHeight, gameState.playerPosition.z,
-                  gameState.playerPosition.x + sin(gameState.playerAngle), gameState.playerHeight,
-                  gameState.playerPosition.z + cos(gameState.playerAngle),
-                  0.0f, 1.0f, 0.0f);
-    }
-    
-    // Draw Ground 200 quad grid - THIS MUST BE FIRST
+    // Calculate the effective angle 
+    float effectiveAngle = gameState.playerAngle;    
+
+    //  LookAt calculations
+    float lookX = gameState.playerPosition.x + sin(effectiveAngle) * cos(gameState.playerPitch);
+    float lookY = (gameState.playerHeight + 0.5f) + sin(gameState.playerPitch);
+    float lookZ = gameState.playerPosition.z + cos(gameState.playerAngle) * cos(gameState.playerPitch); 
+    // lookZ should use effectiveAngle too
+    lookZ = gameState.playerPosition.z + cos(effectiveAngle) * cos(gameState.playerPitch);
+
+    gluLookAt(gameState.playerPosition.x, gameState.playerHeight + 0.5f, gameState.playerPosition.z,
+              lookX, lookY, lookZ,
+              0.0, 1.0, 0.0);
+              
+     //ground plane size
     glBegin(GL_QUADS);
     glColor3f(0.5f, 0.8f, 0.5f);  // Green ground
     glVertex3f(-200.0f, 0.0f, -200.0f);
@@ -1351,18 +1034,9 @@ void display() {
     for (const auto& tower : gameState.towers)  tower.draw();
     for (const auto& gold : gameState.goldPieces) gold.draw();   
     for (const auto& diamond : gameState.diamondPieces) diamond.draw();
-    
-    // Draw pads with their current colors
-    for (size_t i = 0; i < gameState.pads.size(); ++i) {
-        std::vector<float> padColor;
-        if (i < gameState.padColors.size()) {
-            std::string currentColor = gameState.getCurrentPadColor(i);
-            padColor = gameState.getColorRGB(currentColor);
-        } else {
-            padColor = {1.0f, 0.0f, 0.0f};
-        }
-        gameState.pads[i].draw(padColor);
-    }
+    // draw treasure towers
+    for (const auto& tt : gameState.treasuretowers) tt.draw();
+       
     
     for (const auto& spider : gameState.spiders) {
         float legAnim = spiderLegAnimation;
@@ -1386,472 +1060,463 @@ void display() {
         slime.draw(slimeAnim);
     } 
     
-    // Draw 2D weapon overlay
+    // Draw wasps
+    for (const auto& wasp : gameState.wasps) {
+        float waspAnim = slimeAnimation; // Reuse slime animation for simplicity
+        if (!wasp.alive) waspAnim = 0.0f;
+        wasp.draw(waspAnim);
+    }
+    
+    // Draw 2D weapon overlay (3D weapon with sight)
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
     glLoadIdentity();
     glOrtho(0, 800, 600, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glPushMatrix();
-    glLoadIdentity();
-    // Draw weapon overlay
-    glColor3f(0.5f, 0.5f, 0.5f);
-    glBegin(GL_QUADS);
-    glVertex2f(350, 550); glVertex2f(450, 550);
-    glVertex2f(450, 580); glVertex2f(350, 580);
-    glEnd();
-    glColor3f(0.3f, 0.3f, 0.3f);
-    glBegin(GL_QUADS);
-    glVertex2f(370, 580); glVertex2f(430, 580);
-    glVertex2f(430, 600); glVertex2f(370, 600);
-    glEnd();
+    glLoadIdentity();    
+    
+    drawWeapon(); //Gemini draw weapon function
+    
+    
+    //Bullets
+    glDisable(GL_LIGHTING); // Trails look better without lighting
+    for (const auto& b : gameState.bullets) {
+        if (!b.active) continue;
+
+        // Draw the Head
+        glPushMatrix();
+        glTranslatef(b.position.x, b.position.y, b.position.z);
+        glColor3f(1.0f, 1.0f, 0.0f); 
+        glutSolidSphere(BULLET_RADIUS, 8, 8);
+        glPopMatrix();
+
+        // Draw the Trail (The Interpolation)
+        glBegin(GL_LINE_STRIP);
+        for (size_t i = 0; i < b.history.size(); ++i) {
+            // Fade the trail based on history index
+            float alpha = 1.0f - ((float)i / b.history.size());
+            glColor4f(1.0f, 0.5f, 0.0f, alpha); 
+            glVertex3f(b.history[i].x, b.history[i].y, b.history[i].z);
+        }
+        glEnd();
+    }
+    glEnable(GL_LIGHTING);
+    
     glPopMatrix();
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
+    glMatrixMode(GL_MODELVIEW);      
+ 
+    renderHUD();    
     
-    // Draw Radar and  HUD 
-    drawRadar();
-    renderHUD();
-    
+    if (gameState.showMap) {
+        renderMap();
+    }
     glutSwapBuffers();
+    
+   
+              
 }
 
 //======================================================================
 void keyboard(unsigned char key, int, int) {
-    // Reset always works
-    if (key == 'r' || key == 'R') {
-        std::cout << "Reset\n";
-        gameState.reset();
+    // Reset 
+    if (key == 'x' || key == 'X') {
+        //std::cout << "Reset\n";
+        gameState.resetToStart();
         return;
     }
     
     // Reset to original position
     if (key == 'o' || key == 'O') {
-        std::cout << "Reset to original position\n";
-        gameState.resetToOriginal();
+        //std::cout << "Teleport -Reset to original position\n";
+        gameState.teleport();
+        playerTeleportPhrase();
         return;
     }
+     
     
     if (!gameState.playerAlive) return;
     
     switch (key) {
         case 'w': case 'W': gameState.moveForward(0.5f); break;
         case 's': case 'S': gameState.moveBackward(0.5f); break;
-        case 'a': case 'A': gameState.turnLeft(0.01f); break;        
-        case 'd': case 'D': gameState.turnRight(0.01f); break; 
+        case 'a': case 'A': gameState.turnLeft(0.05f); break;        
+        case 'd': case 'D': gameState.turnRight(0.05f); break; 
         case 'c': case 'C': std::cout << "Reset puzzle" << std::endl; break; 
-        case 'e': case 'E': 
-            std::cout << "e-key pressed: Activate puzzle" << std::endl;
-            // Here we can add puzzle activation logic if needed
-            break;      
-        case 'f': case 'F': gameState.flipView = !gameState.flipView;  break;
-        case 'j': case 'J': 
-            // Check if player is near any tower for jumping
-            if (gameState.canJump) {  // Only allow jumping if puzzle is solved
-                for (const auto& tower : gameState.towers) {
-                    if (checkTowerJumpCollision(gameState.playerPosition, tower.position, Tower::TOWER_WIDTH/2, JUMP_DISTANCE_RANGE)) {
-                        // Player is close enough to jump to tower top
-                        gameState.onTower = true;
-                        gameState.towerHeight = tower.position.y + Tower::TOWER_HEIGHT/2 + 0.5f; // Add some offset for player height
-                        std::cout << "Jumping to tower top at height: " << gameState.towerHeight << std::endl;
-                        break;
-                    }
-                }
-                if (!gameState.onTower) {
-                    // If not close to tower, reset to ground level
-                    gameState.playerHeight = 1.0f;
-                    std::cout << "Not near tower, resetting to ground level" << std::endl;
-                }
-            } else {
-                std::cout << "Puzzle not solved yet - cannot jump!" << std::endl;
-            }
-            break; 
-            
-        case 'p': case 'P': 
-            std::cout << "p-key pressed: Cycle color on pad" << std::endl;
-            // Check if player is over a pad and cycle color
-            {
-                int padIndex = gameState.getPlayerOverPadIndex();
-                if (padIndex != -1) {
-                    gameState.cyclePadColor(padIndex);
-                    
-                    // Check if puzzle is solved after cycling colors
-                    if (gameState.isAllPadsSameColor()) {
-                        std::cout << "Color combination puzzle solved!" << std::endl;
-                        gameState.canJump = true;  // Enable jumping when puzzle is solved
-                    }
-                } else {
-                    std::cout << "Not over any pad to cycle colors" << std::endl;
-                }
-            }
-            break;      
-		
+              
+        
+        case 'r': case 'R': 
+        gameState.rotate(M_PI / 2.0f); // Rotate 90 degrees clockwise
+        break;
+        
+        		
         case 'l': case 'L': 
-            // Cycle through game levels
-            if (gameState.currentLevel == GameState::EASY) {
-                gameState.setLevel(GameState::MEDIUM);
-                std::cout << "Switched to MEDIUM level" << std::endl;
-            } else if (gameState.currentLevel == GameState::MEDIUM) {
-                gameState.setLevel(GameState::HARD);
-                std::cout << "Switched to HARD level" << std::endl;
-            } else {
-                gameState.setLevel(GameState::EASY);
-                std::cout << "Switched to EASY level" << std::endl;
+        // Cycle through game levels
+        if (gameState.currentLevel == GameState::EASY) {
+            gameState.setLevel(GameState::MEDIUM);
+            //std::cout << "Switched to MEDIUM level" << std::endl;
+        } else if (gameState.currentLevel == GameState::MEDIUM) {
+            gameState.setLevel(GameState::HARD);
+            //std::cout << "Switched to HARD level" << std::endl;
+        } else {
+            gameState.setLevel(GameState::EASY);
+            //std::cout << "Switched to EASY level" << std::endl;
+        }        
+        break;
+        
+        
+        
+        case 'm': case 'M':     
+        gameState.showMap=!gameState.showMap;
+        //std::cout << "Game Map: " << (gameState.showMap ? "ON" : "OFF") << std::endl;
+        break;
+        
+        case 'u': case 'U': 
+        gameState.playerPitch += 0.05f; 
+        if (gameState.playerPitch > 1.4f) gameState.playerPitch = 1.4f; // Clamp slightly before 90 deg
+        break;
+        case 'i': case 'I': 
+        gameState.playerPitch -= 0.05f; 
+        if (gameState.playerPitch < -1.4f) gameState.playerPitch = -1.4f; // Clamp slightly before -90 deg
+        break;
+         
+       
+        case ' ': { // Space to shoot	            
+            float fireAngle = gameState.playerAngle;
+            float dx = sin(fireAngle) * cos(gameState.playerPitch);
+            float dy = sin(gameState.playerPitch);
+            float dz = cos(fireAngle) * cos(gameState.playerPitch);	
+              
+            Vector3 bulletDir(dx, dy, dz);
+            Vector3 startPos = gameState.playerPosition;
+            startPos.y += 0.5f; // Fire from chest height        
+            gameState.bullets.emplace_back(startPos, bulletDir);
+        } break; 
+                
+        case 't': case 'T':
+        // Jump to top of nearest tower
+        for (const auto& tower : gameState.towers) {
+            if (checkTowerJumpCollision(gameState.playerPosition, tower.position, Tower::TOWER_WIDTH/2, JUMP_DISTANCE_RANGE)) {
+                gameState.onTower = true;
+                gameState.playerHeight = tower.position.y + Tower::TOWER_HEIGHT/2 + 1.0f;
+                playerTowerJumpPhrase();
+                return; // Exit once jump is successful
             }
-            gameState.reset();  // Reset with new level settings
-            break;
-		
-        case ' ':
-            if (gameState.playerAlive) {
-                // Fire bullet in the direction the player is facing
-                Vector3 bulletDir;
-                if (gameState.flipView) {
-                    // When flipped, fire in the opposite direction
-                    bulletDir = Vector3(-sin(gameState.playerAngle), 0, -cos(gameState.playerAngle));
-                } else {
-                    bulletDir = Vector3(sin(gameState.playerAngle), 0, cos(gameState.playerAngle));
-                }
-                gameState.bullets.emplace_back(gameState.playerPosition, bulletDir);
+        }
+        for (const auto& tt : gameState.treasuretowers) {
+            if (checkTowerJumpCollision(gameState.playerPosition, tt.position, TreasureTower::TOWER_WIDTH/2, JUMP_DISTANCE_RANGE)) {
+                gameState.onTower = true;
+                gameState.playerHeight = tt.position.y + TreasureTower::TOWER_HEIGHT/2 + 1.0f;
+                playerTowerJumpPhrase();
+                return;
             }
-            break;  
-             
-        case 'z': case 'Z': showRadar=!showRadar; break;  
+        }
+        break; 
+                
+        case 'g': case 'G':
+        // Jump down from tower
+        if (gameState.onTower) {
+            gameState.onTower = false;
+            // Reset to ground level
+            gameState.playerHeight = 1.5f;
+        }
+        break;  
+        
+        case 'z': case 'Z': 
+        audioEnabled = !audioEnabled;
+        //std::cout << "Audio " << (audioEnabled ? "ON" : "OFF") << std::endl;
+        break;
+        
         case 27: exit(0); break;
     }
     glutPostRedisplay();
 }
 
+
 //======================================================================
 void specialKeys(int key, int, int) {
     if (!gameState.playerAlive) return;
     switch (key) {
-        case GLUT_KEY_UP:    gameState.moveForward(0.5f); break;
-        case GLUT_KEY_DOWN:  gameState.moveBackward(0.5f); break;
-        case GLUT_KEY_LEFT:  gameState.turnLeft(0.01f); break;
-        case GLUT_KEY_RIGHT: gameState.turnRight(0.01f); break;
+        case GLUT_KEY_UP:    gameState.moveForward(0.25f); break;
+        case GLUT_KEY_DOWN:  gameState.moveBackward(0.25f); break;
+        case GLUT_KEY_LEFT:  gameState.turnLeft(0.025f); break;
+        case GLUT_KEY_RIGHT: gameState.turnRight(0.025f); break;
     }
     glutPostRedisplay();
 }
 
-//======================================================================
-void updateSlimeAI() {
-    for (auto& slime : gameState.slimes) {
-       
-        Vector3 dir = gameState.playerPosition - slime.position;
-        float dist = std::sqrt(dir.x*dir.x + dir.z*dir.z);
 
-        // Set chasing flag so Spider::update() skips walking
-        slime.chasing = (dist < SLIME_CHASE_DISTANCE);
-
-        if (slime.chasing) {
-            // Normalize direction (only X/Z)
-            dir.x /= dist; dir.z /= dist;
-            slime.position += dir * slime.speed * 0.5f;
-        }
-
-        // Random walk component – applied only when not chasing
-        if (!slime.chasing)
-            slime.angle += (rand() % 100 - 50) * 0.001f;
+// FPS Calculation Helper
+void handleFPSCalculation() {
+    frameCount++;
+    int currentTime = glutGet(GLUT_ELAPSED_TIME);
+    if (currentTime - lastTime >= 1000) {
+        fps = frameCount * 1000.0f / (currentTime - lastTime);
+        frameCount = 0;
+        lastTime = currentTime;
     }
 }
 
-//======================================================================
-
-void timer(int) {        
-    spiderLegAnimation += 0.1f;
-    slimeAnimation += 0.1f;    
-    
-    updateSpiderAI();          // AI chase logic
-    for (auto& spider : gameState.spiders) spider.update(); // walking when not chasing
-    
-    updateSlimeAI();          // AI chase logic
-    for (auto& slime : gameState.slimes) slime.update(); // walking when not chasing
-    
-    gameState.updateBullets();
-    
-     // Bullet–spider collisions
+// Projectile Collision Helper
+void handleBulletCollisions() {
     for (auto it = gameState.bullets.begin(); it != gameState.bullets.end(); ) {
-        if (it->active) {
-            bool hit = false;
-            for (auto& s : gameState.spiders) {
-                if (s.alive && s.hitCount < 4 &&
-                    checkCollision(it->position, s.position, BULLET_RADIUS, Spider::SPIDER_RADIUS)) {
-                    s.hitCount++;
-                    it->active = false;
-                    hit = true;
-                    //std::cout << "Spider hit! Count: " << s.hitCount << "\n";
-                    if (s.hitCount >= 4) {
-                        s.alive = false;
-                        //std::cout << "Spider killed!\n";
+        bool bulletHit = false;
 
-                        // Spawn new spider when one dies
-                        float safeDistance = 5.0f;
-                        Vector3 spawnPos;
-                        bool validPos = false;
-
-                        while (!validPos) {
-                            spawnPos = gameState.randomPosition();
-                            float dist = distance(gameState.playerPosition, spawnPos);
-                            if (dist > safeDistance) {
-                                validPos = true;
-                            }
-                        }
-
-                        gameState.spiders.emplace_back(spawnPos);
-                        //std::cout << "Spawned new spider at (" << spawnPos.x << "," << spawnPos.z << ")\n";
-                    }
-                    break;
+        // Check Spiders
+        for (auto& s : gameState.spiders) {
+            if (s.alive && checkCollision(it->position, s.position, BULLET_RADIUS, Spider::SPIDER_RADIUS)) {
+                s.hitCount++;
+                bulletHit = true;
+                if (s.hitCount >= 4) {
+                    s.alive = false;
+                    gameState.spawnSpider(); // Spawn new spider
                 }
+                break;
             }
-            if (hit) it = gameState.bullets.erase(it);
-            else ++it;
-        } else {
-            it = gameState.bullets.erase(it);
         }
-    }
-    
-         // Bullet–slime collisions
-    for (auto it = gameState.bullets.begin(); it != gameState.bullets.end(); ) {
-        if (it->active) {
-            bool hit = false;
+
+        // Check Slimes (only if bullet didn't hit spider)
+        if (!bulletHit) {
             for (auto& slime : gameState.slimes) {
-                if (slime.alive && slime.hitCount < 4 &&
-                    checkCollision(it->position, slime.position, BULLET_RADIUS, Slime::SLIME_HEAD_RADIUS)) {
+                if (slime.alive && checkCollision(it->position, slime.position, BULLET_RADIUS, Slime::SLIME_HEAD_RADIUS)) {
                     slime.hitCount++;
-                    it->active = false;
-                    hit = true;
-                    //std::cout << "Slime hit! Count: " << slime.hitCount << "\n";
+                    bulletHit = true;
                     if (slime.hitCount >= 4) {
                         slime.alive = false;
-                        //std::cout << "Slime killed!\n";
-
-                        // Spawn new slime when one dies
-                        float safeDistance = 5.0f;
-                        Vector3 spawnPos;
-                        bool validPos = false;
-
-                        while (!validPos) {
-                            spawnPos = gameState.randomPosition();
-                            float dist = distance(gameState.playerPosition, spawnPos);
-                            if (dist > safeDistance) {
-                                validPos = true;
-                            }
-                        }
-
-                        gameState.slimes.emplace_back(spawnPos);
-                        //std::cout << "Spawned new slime at (" << spawnPos.x << "," << spawnPos.z << ")\n";
+                        // Spawn new slime at valid position
+                        gameState.slimes.emplace_back(gameState.randomPosition());
                     }
                     break;
                 }
             }
-            if (hit) it = gameState.bullets.erase(it);
-            else ++it;
-        } else {
-            it = gameState.bullets.erase(it);
         }
-    }
 
-    // Gold collection
-    for (auto it = gameState.goldPieces.begin(); it != gameState.goldPieces.end(); ) {
-        if (!it->collected && checkCollision(gameState.playerPosition, it->position, 0.1f, GoldPiece::GOLD_RADIUS)) {
-            it->collected = true;
-            gameState.goldCount++;
-            //std::cout << "Collected gold at (" << it->position.x << "," << it->position.z << ")\n";            
-            it = gameState.goldPieces.erase(it);
-        } else ++it;
-    }
-   
-    // Player–spider collision
-    for (const auto& s : gameState.spiders) {
-        if (s.alive && checkCollision(gameState.playerPosition, s.position, 0.1f, Spider::SPIDER_RADIUS)) {
-            //std::cout << "Player collided with spider at (" << s.position.x << "," << s.position.z << ")\n";
-            gameState.playerAlive = false;
-            std::cout << "Player Dead\n";
-            break;
-        }
-    }
-    
-    
-   // Check for player slime collision
-   // Slimes can only kill player if they are at ground level
-   bool playerKilled = false;
-   for (const auto& slime : gameState.slimes) {
-       if (!slime.alive) continue;
-       
-       // Check if slime is close to player
-       float dist = distance(slime.position, gameState.playerPosition);
-       if (dist < 0.5f) { // Collision distance
-           // Only kill player if they are not on tower
-           if (!gameState.onTower) {
-               playerKilled = true;
-               std::cout << "Player killed by slime!" << std::endl;
-               break;
-           }
-       }
-   }
-   
-   if (playerKilled) {
-       gameState.playerAlive = false;
-       std::cout << "Game Over - Player died!" << std::endl;
-   }
-   
-   // Prevent slimes from entering tower cubes
-   for (auto& slime : gameState.slimes) {
-       if (!slime.alive) continue;
-       
-       for (const auto& tower : gameState.towers) {
-           // Check if slime head is inside the tower cube
-           if (isSlimeHeadInTower(slime.position, tower.position, Tower::TOWER_WIDTH, Tower::TOWER_HEIGHT, Tower::TOWER_DEPTH, Slime::SLIME_HEAD_RADIUS)) {
-               // Move slime away from tower to prevent it from entering
-               Vector3 dir = slime.position - tower.position;
-               float dist = distance(slime.position, tower.position);
-               
-               if (dist > 0) {
-                   dir.x /= dist; 
-                   dir.z /= dist;
-                   // Push slime away from tower center
-                   slime.position += dir * 0.1f;
-               }
-           }
-           
-           // Additional check to prevent slimes from getting too close to tower edges
-           float dx = slime.position.x - tower.position.x;
-           float dz = slime.position.z - tower.position.z;
-           float distanceToTowerCenter = sqrt(dx*dx + dz*dz);
-           
-           // Keep slimes at a minimum distance from tower edges
-           if (distanceToTowerCenter < SLIME_TOWER_DISTANCE) {
-               // Push slime away from tower center
-               if (distanceToTowerCenter > 0.1f) { // Avoid division by zero
-                   dx /= distanceToTowerCenter;
-                   dz /= distanceToTowerCenter;
-                   slime.position.x += dx * (SLIME_TOWER_DISTANCE - distanceToTowerCenter);
-                   slime.position.z += dz * (SLIME_TOWER_DISTANCE - distanceToTowerCenter);
-               }
-           }
-       }
-   }
-   
-   // Handle slime-slime collisions to prevent overlapping
-   for (size_t i = 0; i < gameState.slimes.size(); ++i) {
-       if (!gameState.slimes[i].alive) continue;
-       for (size_t j = i + 1; j < gameState.slimes.size(); ++j) {
-           if (!gameState.slimes[j].alive) continue;
-           if (checkSlimeCollision(gameState.slimes[i].position, gameState.slimes[j].position, 
-                                  Slime::SLIME_HEAD_RADIUS, Slime::SLIME_HEAD_RADIUS)) {
-               // Push slimes apart to prevent overlap
-               Vector3 dir = gameState.slimes[i].position - gameState.slimes[j].position;
-               float dist = distance(gameState.slimes[i].position, gameState.slimes[j].position);
-               
-               if (dist > 0) {
-                   dir.x /= dist; 
-                   dir.z /= dist;
-                   // Move both slimes apart
-                   gameState.slimes[i].position += dir * 0.05f;
-                   gameState.slimes[j].position -= dir * 0.05f;
-               }
-           }
-       }
-   }
-   
-   // When player is on tower, move slimes away from towers and stop chasing
-   if (gameState.onTower) {
-       for (auto& slime : gameState.slimes) {
-           if (!slime.alive) continue;
-           
-           // Stop slimes from chasing when player is on tower
-           slime.chasing = false;
-           
-           // Move slimes away from towers by a fixed distance (5 units)
-           for (const auto& tower : gameState.towers) {
-               Vector3 dir = slime.position - tower.position;
-               float dist = distance(slime.position, tower.position);
-               
-               // If slime is within 5 units of tower center, push it away
-               if (dist < SLIME_PUSH_AWAY_DISTANCE) {
-                   if (dist > 0) {
-                       dir.x /= dist; 
-                       dir.z /= dist;
-                       // Push slime away from tower center by exactly 5 units
-                       slime.position += dir * (SLIME_PUSH_AWAY_DISTANCE- dist);
-                   }
-               }
-           }
-       }
-   }
-   
-   // Check for tower collision with improved logic - prevent player from walking through towers
-    //bool playerBlocked = false;
-    for (const auto& tower : gameState.towers) {
-        // Check if player is inside the tower cube
-        if (isPointInCube(gameState.playerPosition, tower.position, Tower::TOWER_WIDTH, Tower::TOWER_HEIGHT, Tower::TOWER_DEPTH)) {
-            std::cout << "Player collided with tower at (" << tower.position.x << "," << tower.position.z << ")\n";
-            
-            // Prevent player from going inside the tower - push back
-            if (!gameState.onTower) {
-                std::cout << "Player blocked by tower" << std::endl;
-                //playerBlocked = true;
-                
-                // Push player back in the direction they came from, but account for flipView
-                float pushX = 0.0f;
-                float pushZ = 0.0f;
-                
-                if (gameState.flipView) {
-                    // When flipped, move in opposite direction
-                    pushX = -sin(gameState.playerAngle + M_PI) * PLAYER_PUSH_AWAY_DISTANCE;
-                    pushZ = -cos(gameState.playerAngle + M_PI) * PLAYER_PUSH_AWAY_DISTANCE;
-                } else {
-                    // Normal case
-                    pushX = -sin(gameState.playerAngle) * PLAYER_PUSH_AWAY_DISTANCE;
-                    pushZ = -cos(gameState.playerAngle) * PLAYER_PUSH_AWAY_DISTANCE;
+        // Check Wasps
+        if (!bulletHit) {
+            for (auto& wasp : gameState.wasps) {
+                if (wasp.alive && checkCollision(it->position, wasp.position, BULLET_RADIUS, WASP_HIT_RADIUS)) {
+                    wasp.hitCount++;
+                    bulletHit = true;
+                    if (wasp.hitCount >= 3) {
+                        wasp.alive = false;
+                        // Respawn wasp on a random tower
+                        if (!gameState.towers.empty()) {
+                            int r = rand() % gameState.towers.size();
+                            Vector3 p = gameState.towers[r].position;
+                            gameState.wasps.emplace_back(Vector3(p.x, p.y + 5.0f, p.z));
+                        }
+                    }
+                    break;
                 }
-                
-                gameState.playerPosition.x += pushX;
-                gameState.playerPosition.z += pushZ;
             }
-            break;
         }
-    }   
-   
-   // Check if player has moved off the tower
-   bool onTowerNow = false;
-   for (const auto& tower : gameState.towers) {
-       if (checkTowerJumpCollision(gameState.playerPosition, tower.position, Tower::TOWER_WIDTH/2, JUMP_DISTANCE_RANGE)) {
-           onTowerNow = true;
-           break;
-       }
-   }
-   
-   // If player was on tower but is no longer, reset to ground level
-   if (gameState.onTower && !onTowerNow) {
-       gameState.playerHeight = 1.0f;
-       gameState.onTower = false;
-       std::cout << "Player left tower, returning to ground level" << std::endl;
-   }
-   
-   // If player is on tower, maintain tower height
-   if (gameState.onTower) {
-       gameState.playerHeight = gameState.towerHeight;
-   }
-   
-   // Check for diamond collection - only allow when canJump is true
-   for (auto& piece : gameState.diamondPieces) {
-       if (!piece.collected && gameState.canJump) {  // Only collect diamonds if player can jump
-           float dist = distance(gameState.playerPosition, piece.position);
-           if (dist < 1.0f) { // Collect if close enough
-               piece.collected = true;
-               gameState.collectedDiamonds++;
-               std::cout << "Diamond collected! Total: " << gameState.collectedDiamonds << std::endl;
-           }
-       }
-   }
-   
-   glutPostRedisplay();
-   glutTimerFunc(16, timer, 0);
+
+        if (bulletHit || !it->active) it = gameState.bullets.erase(it);
+        else ++it;
+    }
+}
+
+void checkTowerCollision(Vector3& playerPos, const Vector3& towerPos, float w, float d) {
+    // Add a small margin (0.5f) so the player doesn't clip through the wall
+    float hw = w / 2.0f + 0.5f; 
+    float hd = d / 2.0f + 0.5f;
+
+    // Check if player is within the tower's X and Z bounds
+    if (playerPos.x > towerPos.x - hw && playerPos.x < towerPos.x + hw &&
+        playerPos.z > towerPos.z - hd && playerPos.z < towerPos.z + hd) {
+        
+        // Calculate distance to each side to find the closest exit point
+        float dxLeft   = abs(playerPos.x - (towerPos.x - hw));
+        float dxRight  = abs(playerPos.x - (towerPos.x + hw));
+        float dzBack   = abs(playerPos.z - (towerPos.z - hd));
+        float dzFront  = abs(playerPos.z - (towerPos.z + hd));
+
+        float minDist = std::min({dxLeft, dxRight, dzBack, dzFront});
+
+        // Push the player to the nearest edge
+        if (minDist == dxLeft)       playerPos.x = towerPos.x - hw;
+        else if (minDist == dxRight) playerPos.x = towerPos.x + hw;
+        else if (minDist == dzBack)  playerPos.z = towerPos.z - hd;
+        else if (minDist == dzFront) playerPos.z = towerPos.z + hd;
+    }
 }
 
 
+void checkTreasureTowerCollision(Vector3& p, const Vector3& t, float w, float d) {
+    float hw = w / 2.0f;
+    float hd = d / 2.0f;
+    float margin = 0.5f;
+
+    // Is the player currently inside the tower footprint?
+    bool isInside = (p.x > t.x - hw && p.x < t.x + hw && p.z > t.z - hd && p.z < t.z + hd);
+
+    if (isInside) {
+        // PUSH BACK INSIDE: If they hit the back or sides from the inside
+        if (p.x < t.x - hw + margin) p.x = t.x - hw + margin; // Left wall
+        if (p.x > t.x + hw - margin) p.x = t.x + hw - margin; // Right wall
+        if (p.z < t.z - hd + margin) p.z = t.z - hd + margin; // Back wall
+        //  No check for +Z (Front) allows them to walk out the door
+    } else {
+        // PUSH AWAY: Standard AABB collision for the 3 solid sides
+        if (p.x > t.x - hw - margin && p.x < t.x + hw + margin &&
+            p.z > t.z - hd - margin && p.z < t.z + hd + margin) {
+            
+            // Only block if NOT entering through the front door area
+            if (p.z < t.z + hd) { 
+                float dxL = abs(p.x - (t.x - hw - margin));
+                float dxR = abs(p.x - (t.x + hw + margin));
+                float dzB = abs(p.z - (t.z - hd - margin));
+                float minDist = std::min({dxL, dxR, dzB});
+
+                if (minDist == dxL) p.x = t.x - hw - margin;
+                else if (minDist == dxR) p.x = t.x + hw + margin;
+                else p.z = t.z - hd - margin;
+            }
+        }
+    }
+}
+
+//======================================================================
+// handle player collisions with tower detection
+//======================================================================
+
+void handlePlayerCollisions() {
+   
+    // check player killed
+    for (const auto& spider : gameState.spiders) 
+        if (spider.alive && checkCollision(gameState.playerPosition, spider.position, 0.5f, Spider::SPIDER_RADIUS) &&  !gameState.onTower) 
+            gameState.playerAlive = false;
+            
+     for (const auto& slime : gameState.slimes) 
+        if (slime.alive && checkCollision(gameState.playerPosition, slime.position, 0.5f, Slime::SLIME_HEAD_RADIUS) &&  !gameState.onTower) 
+            gameState.playerAlive = false;
+    
+  
+     // Use a 2D distance check for the wasps (ignoring height)     
+	for (const auto& wasp : gameState.wasps) {
+	if (wasp.alive) {
+	// Calculate 2D distance (X and Z only)
+	float dx = wasp.position.x - gameState.playerPosition.x;
+	float dz = wasp.position.z - gameState.playerPosition.z;
+	float dist2D = sqrt(dx*dx + dz*dz);
+	
+	if (dist2D < WASP_HIT_RADIUS) {
+	gameState.playerAlive = false;
+	}
+	}
+	}
+
+    // Solid Tower Collisions (Only if we aren't standing ON them)
+    if (!gameState.onTower) {
+        for (const auto& t : gameState.towers) {
+            checkTowerCollision(gameState.playerPosition, t.position, Tower::TOWER_WIDTH, Tower::TOWER_DEPTH);
+        }
+        for (const auto& tt : gameState.treasuretowers) {
+            checkTreasureTowerCollision(gameState.playerPosition, tt.position, TreasureTower::TOWER_WIDTH, TreasureTower::TOWER_DEPTH);
+        }
+    }
+
+    //Item Collection (Gold & Diamonds)
+    // Using 2D distance for items on the ground to avoid Y-axis misses
+    for (auto it = gameState.goldPieces.begin(); it != gameState.goldPieces.end(); ) {
+        float dist2D = sqrt(pow(it->position.x - gameState.playerPosition.x, 2) + 
+                            pow(it->position.z - gameState.playerPosition.z, 2));
+        if (dist2D < 1.2f) {
+            gameState.goldCount++;
+            it = gameState.goldPieces.erase(it);            
+            playerGoldCapturePhrase();            
+        } else ++it;
+    }
+    
+    // diamond collection with isOnTower logic
+    for (auto it = gameState.diamondPieces.begin(); it != gameState.diamondPieces.end(); ) {
+        float dist2D = sqrt(pow(it->position.x - gameState.playerPosition.x, 2) + 
+                            pow(it->position.z - gameState.playerPosition.z, 2));
+        if (dist2D < 1.2f) {
+            // Only collect if player state matches diamond state
+            if (gameState.onTower == it->getIsOnTower()) {
+                gameState.collectedDiamonds++;
+                it = gameState.diamondPieces.erase(it);
+                playerDiamondCapturePhrase();
+            } else {
+                ++it;
+            }
+        } else ++it;
+    }
+}
+
+//=====================================================================
+void handleEnvironmentPhysics() {
+    // Gravity and falling physics
+    if (!gameState.onTower && gameState.playerPosition.y > 1.5f) {
+        gameState.playerPosition.y -= 0.15f; // Falling speed
+        
+        // Ground collision
+        if (gameState.playerPosition.y < 1.5f) {
+            gameState.playerPosition.y = 1.5f;
+        }
+    }
+
+    // Ensure player doesn't fall below ground level
+    if (gameState.playerPosition.y < 1.5f) {
+        gameState.playerPosition.y = 1.5f;
+    }
+}
+
+//======================================================================
+
+
+// Audio Trigger Helper
+void handleAudioWarnings() {
+    if (!audioEnabled || !gameState.playerAlive) return;
+
+    bool danger = false;
+    float warnDist = 6.0f;
+
+    for (auto& s : gameState.spiders) if (s.alive && distance(s.position, gameState.playerPosition) < warnDist) danger = true;
+    for (auto& sl : gameState.slimes) if (sl.alive && distance(sl.position, gameState.playerPosition) < warnDist) danger = true;
+    for (auto& w : gameState.wasps) if (w.alive && distance(w.position, gameState.playerPosition) < warnDist) danger = true;
+
+    static bool dangerPlayed = false;
+    if (danger && !dangerPlayed) {
+        g_audio_manager->playPhraseAsync({VOICE_DANGER, VOICE_CREATURE, VOICE_APPROACHING});
+        dangerPlayed = true;
+    } else if (!danger) dangerPlayed = false;
+}
+
+//======================================================================
+
+void timer(int) {
+    
+    static int lastTime = glutGet(GLUT_ELAPSED_TIME);
+    int currentTime = glutGet(GLUT_ELAPSED_TIME);
+    float deltaTime = (currentTime - lastTime) / 1000.0f; // Convert milliseconds to seconds
+    lastTime = currentTime;
+    
+    
+    if (gameState.playerAlive) {
+        spiderLegAnimation += 0.1f;
+        slimeAnimation += 0.1f;
+        
+        handleFPSCalculation();
+        
+        updateSpiderAI();
+        updateSlimeAI();
+        for (auto& wasp : gameState.wasps) if (wasp.alive) wasp.update();
+
+        gameState.updateBullets(deltaTime);  
+        
+        handleBulletCollisions();
+        handlePlayerCollisions();
+        handleEnvironmentPhysics();
+        handleAudioWarnings();  
+    }
+ 
+    glutPostRedisplay();
+    glutTimerFunc(16, timer, 0); // Aim for ~60fps
+}
 
 //======================================================================
 void init() {
@@ -1877,16 +1542,23 @@ void init() {
 
 //======================================================================
 int main(int argc, char** argv) {
+    // Initialize audio manager
+    g_audio_manager = new GameAudioManager();
+    playerGameOpenPhrase();
+    
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
     glutInitWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
     glutInitWindowPosition(100, 100);
-    glutCreateWindow("ZonWorld");
+    glutCreateWindow("GameWorld");
     init();
     glutDisplayFunc(display);
     glutKeyboardFunc(keyboard);
     glutSpecialFunc(specialKeys);
     glutTimerFunc(0, timer, 0);
     glutMainLoop();
+    
+    // Cleanup
+    delete g_audio_manager;
     return 0;
 }
