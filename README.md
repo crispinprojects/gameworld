@@ -25,6 +25,7 @@ The game is played from a first-person perspective. The player experiences the a
 | **O** | Teleport to start position. |
 | **M** | Map  (game map on/off). |
 | **Z** | Audio (on/off). |
+| **B** | Bluetooth speakers (on/off). |
 | **X** | Reset the game. |
 | **ESC** | Exit the game|
 
@@ -61,6 +62,25 @@ A game map showing the position of towers, gold pieces, diamonds and enemies can
 ![](gameworld6.png)
 ![](gameworld7.png)
 ![](gameworld8.png)
+
+
+## Bluetooth Speakers
+
+To use Bluetooth speakers with Debian and Raspberry Pi OS  you need to install the "bluez-alsa-utils" package as shown below.
+
+```
+sudo apt install bluez-alsa-utils
+```
+To check if it is already installed use.
+
+```
+dpkg -l | grep bluez-alsa-utils > /dev/null 2>&1 && echo "Installed" || echo "Not installed"
+
+```
+Use the B key to switch between Bluetooth and monitor speakers. Bluetooth On/Off information is displayed in the HUD.
+
+Bluetooth functionality is experimental but I have tested it with my Raspberry Pi5 with a set of Bluetooth speakers paired to it and this works.
+
 
 ## Build From Source (Debian, Raspberry Pi OS)
 

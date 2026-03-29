@@ -137,65 +137,89 @@ public:
     }
 };
 
+#include <atomic>
+#include <thread>
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include <cstdlib> // for system()
+
 class GameAudioManager {
 private:
     std::atomic<bool> is_playing{false};
-    
+    std::atomic<bool> bluetoothEnabled{false}; // New atomic flag
+
 public:
-    GameAudioManager() {}
-    ~GameAudioManager() {}
-    
-    // Play phrase in background thread
+    GameAudioManager() = default;
+    ~GameAudioManager() = default;
+
     void playPhraseAsync(const std::vector<VoiceWord>& words) {
         if (is_playing.load()) {
             return; // Already playing, skip
         }
-        
-        // Start audio playback in separate thread
+
         std::thread([this, words]() {
             is_playing.store(true);
-            
-            // Build audio buffer
+
             std::vector<int16_t> full_audio;
             SimplePhraseBuilder::buildPhrase(words, full_audio);
-            
-            // Save to temporary file and play
+
             std::ofstream file("temp_audio.wav", std::ios::binary);
             if (file.is_open()) {
                 write_wav_header(file, static_cast<int>(full_audio.size()), SAMPLE_RATE);
                 file.write(reinterpret_cast<const char*>(full_audio.data()),
                            full_audio.size() * sizeof(int16_t));
                 file.close();
-                
-                // Play immediately
-                system("aplay temp_audio.wav > /dev/null 2>&1");
+
+                // Choose command based on bluetooth flag
+                std::string cmd;
+                if (bluetoothEnabled.load()) {
+                    cmd = "aplay -D bluealsa temp_audio.wav > /dev/null 2>&1";
+                } else {
+                    cmd = "aplay temp_audio.wav > /dev/null 2>&1";
+                }
+
+                system(cmd.c_str());
             }
-            
+
             is_playing.store(false);
-        }).detach(); // Detach thread to let it run independently
+        }).detach();
     }
-    
-    // Immediate playback (blocking)
+
     void playImmediatePhrase(const std::vector<VoiceWord>& words) {
-        // Build audio buffer
         std::vector<int16_t> full_audio;
         SimplePhraseBuilder::buildPhrase(words, full_audio);
-        
-        // Save to temporary file and play
+
         std::ofstream file("temp_audio.wav", std::ios::binary);
         if (file.is_open()) {
             write_wav_header(file, static_cast<int>(full_audio.size()), SAMPLE_RATE);
             file.write(reinterpret_cast<const char*>(full_audio.data()),
                        full_audio.size() * sizeof(int16_t));
             file.close();
-            
-            // Play immediately (blocking)
-            system("aplay temp_audio.wav > /dev/null 2>&1");
+
+            // Choose command based on bluetooth flag
+            std::string cmd;
+            if (bluetoothEnabled.load()) {
+                cmd = "aplay -D bluealsa temp_audio.wav > /dev/null 2>&1";
+            } else {
+                cmd = "aplay temp_audio.wav > /dev/null 2>&1";
+            }
+
+            system(cmd.c_str());
         }
     }
-    
+
     bool isAudioPlaying() const {
         return is_playing.load();
+    }
+
+    // Public getter/setter for bluetoothEnabled
+    void setBluetoothEnabled(bool enabled) {
+        bluetoothEnabled.store(enabled);
+    }
+
+    bool getBluetoothEnabled() const {
+        return bluetoothEnabled.load();
     }
 };
 
@@ -823,7 +847,11 @@ void renderHUD() {
         default:                levelStr = "UNKNOWN"; break;
     }
     
-    sprintf(buf, "LEVEL: %s  |  PLAYER: %s", levelStr, (gameState.playerAlive ? "ALIVE" : "DEAD"));
+    sprintf(buf, "LEVEL: %s  |  PLAYER: %s |  BLUETOOTH: %s", 
+    levelStr, 
+    (gameState.playerAlive ? "ALIVE" : "DEAD"),
+    (g_audio_manager->getBluetoothEnabled() ? "ON" : "OFF") 
+    );
     glRasterPos2f(20, 70); // Moved to top
     for (int i = 0; buf[i]; i++) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_12, buf[i]);  
      
@@ -1223,6 +1251,14 @@ void keyboard(unsigned char key, int, int) {
             gameState.playerHeight = 1.5f;
         }
         break;  
+        
+        //Audio
+        case 'b': case 'B':
+            g_audio_manager->setBluetoothEnabled(!g_audio_manager->getBluetoothEnabled());
+            //std::cout << "Bluetooth enabled: " 
+                      //<< (g_audio_manager->getBluetoothEnabled() ? "ON" : "OFF") 
+                      //<< std::endl;
+            break;
         
         case 'z': case 'Z': 
         audioEnabled = !audioEnabled;
