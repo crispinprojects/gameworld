@@ -172,3 +172,5 @@ Active.
 ## Acknowledgements
 
 * [Debian](https://www.debian.org/)
+
+* [Bluetooth Audio ALSA Backend](https://github.com/Arkq/bluez-alsa) 
